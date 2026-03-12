@@ -1,0 +1,45 @@
+{
+  "name": "@zenrows/mcp",
+  "version": "1.0.0",
+  "description": "ZenRows MCP server — Universal Scraper API for AI coding assistants",
+  "type": "module",
+  "bin": {
+    "zenrows-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "node --env-file=.env --import tsx src/index.ts",
+    "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/index.js",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "keywords": [
+    "mcp",
+    "zenrows",
+    "scraping",
+    "web-scraping",
+    "model-context-protocol",
+    "ai",
+    "llm"
+  ],
+  "mcpName": "io.github.ZenRows/zenrows-mcp",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZenRows/zenrows-mcp"
+  }
+}

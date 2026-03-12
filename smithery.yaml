@@ -1,0 +1,17 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - apiKey
+    properties:
+      apiKey:
+        type: string
+        title: ZenRows API Key
+        description: Your ZenRows API key from app.zenrows.com/register
+  commandFunction: |-
+    (config) => ({
+      command: "node",
+      args: ["dist/index.js"],
+      env: { ZENROWS_API_KEY: config.apiKey }
+    })
