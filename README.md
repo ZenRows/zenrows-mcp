@@ -10,6 +10,11 @@
   Give any MCP-compatible AI assistant the ability to scrape any webpage — including JavaScript-rendered content and anti-bot protected sites.
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@zenrows/mcp"><img src="https://img.shields.io/npm/v/@zenrows/mcp" alt="npm version"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
+</p>
+
 ---
 
 ## Quick Start
@@ -240,9 +245,3 @@ npm run dev            # run with .env loaded (requires Node 20.6+)
 npm run build          # compile to dist/
 npm run inspect        # open MCP inspector UI
 ```
-
----
-
-## License
-
-MIT
