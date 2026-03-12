@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/zenrows.svg" alt="ZenRows MCP" width="380">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/zenrows_dark.svg">
+    <img src="assets/zenrows_light.svg" alt="ZenRows MCP" width="380">
+  </picture>
 </p>
 
 <p align="center">
@@ -27,7 +30,7 @@ Scrape https://example.com and summarize the content.
 
 ### `scrape`
 
-Fetches a webpage and returns its content as clean markdown (default), plaintext, raw HTML, PDF, structured JSON, or a screenshot.
+Fetches a webpage and returns its content as clean markdown (default), plaintext, raw HTML, PDF, structured JSON, or a screenshot. See the [ZenRows API docs](https://docs.zenrows.com/universal-scraper-api/api-reference#parameter-overview) for full parameter reference.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
