@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/zenrows_dark.svg">
-    <img src="assets/zenrows_light.svg" alt="ZenRows MCP" width="380">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/zenrows_light.svg">
+    <img src="assets/zenrows_dark.svg" alt="ZenRows MCP" width="380">
   </picture>
 </p>
 
