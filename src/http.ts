@@ -30,22 +30,54 @@ function extractApiKey(req: Request): string | undefined {
 }
 
 const AUTH_SERVER = process.env.OAUTH_AUTH_SERVER ?? "https://app.zenrows.com";
+const MCP_SERVER = process.env.MCP_SERVER ?? "https://mcp.zenrows.com";
 
 app.get("/mcp/.well-known/oauth-authorization-server", (c) =>
   c.redirect("/.well-known/oauth-authorization-server", 301)
 );
 
+// RFC 9728 — OAuth Protected Resource Metadata
+// MCP clients fetch this first to discover the authorization server(s) for this resource.
+app.get("/.well-known/oauth-protected-resource", (c) =>
+  c.json({
+    resource: MCP_SERVER,
+    authorization_servers: [MCP_SERVER],
+    bearer_methods_supported: ["header", "query"],
+    scopes_supported: [],
+  })
+);
+
+// RFC 8414 — OAuth Authorization Server Metadata
+// Issuer must match the URL of the server serving this document (MCP_SERVER, not AUTH_SERVER),
+// because the MCP server acts as an authorization server proxy for client discovery purposes.
 app.get("/.well-known/oauth-authorization-server", (c) =>
   c.json({
-    issuer: AUTH_SERVER,
+    issuer: MCP_SERVER,
     authorization_endpoint: `${AUTH_SERVER}/oauth/mcp/authorize`,
     token_endpoint: `${AUTH_SERVER}/oauth/mcp/token`,
+    registration_endpoint: `${MCP_SERVER}/register`,
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
   })
 );
+
+// RFC 7591 — Dynamic Client Registration
+// MCP clients (Claude.ai, Cursor, etc.) register themselves before initiating OAuth.
+// Since ZenRows API keys are the real auth mechanism, client registration is stateless —
+// we echo back a stable client_id derived from the request (or the one the client provides).
+app.post("/register", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  return c.json(
+    {
+      client_id: body.client_id ?? crypto.randomUUID(),
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      ...body,
+    },
+    201
+  );
+});
 
 app.all("/mcp", async (c) => {
   const apiKey = extractApiKey(c.req.raw);
@@ -57,10 +89,10 @@ app.all("/mcp", async (c) => {
       },
       401,
       {
-        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="https://mcp.zenrows.com/.well-known/oauth-authorization-server"`,
+        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="${MCP_SERVER}/.well-known/oauth-protected-resource"`,
         // CloudFront strips WWW-Authenticate — add Link header as RFC 8615 fallback
         // so MCP clients can still discover the OAuth server
-        "Link": `<https://mcp.zenrows.com/.well-known/oauth-authorization-server>; rel="oauth-authorization-server"`,
+        "Link": `<${MCP_SERVER}/.well-known/oauth-protected-resource>; rel="oauth-protected-resource"`,
       }
     );
   }
