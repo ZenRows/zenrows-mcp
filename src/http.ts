@@ -31,6 +31,10 @@ function extractApiKey(req: Request): string | undefined {
 
 const AUTH_SERVER = process.env.OAUTH_AUTH_SERVER ?? "https://app.zenrows.com";
 
+app.get("/mcp/.well-known/oauth-authorization-server", (c) =>
+  c.redirect("/.well-known/oauth-authorization-server", 301)
+);
+
 app.get("/.well-known/oauth-authorization-server", (c) =>
   c.json({
     issuer: AUTH_SERVER,
