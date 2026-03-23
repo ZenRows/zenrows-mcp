@@ -16,6 +16,20 @@ function extractApiKey(req: Request): string | undefined {
   return new URL(req.url).searchParams.get("apikey") ?? undefined;
 }
 
+const AUTH_SERVER = process.env.OAUTH_AUTH_SERVER ?? "https://app.zenrows.com";
+
+app.get("/.well-known/oauth-authorization-server", (c) =>
+  c.json({
+    issuer: AUTH_SERVER,
+    authorization_endpoint: `${AUTH_SERVER}/oauth/mcp/authorize`,
+    token_endpoint: `${AUTH_SERVER}/oauth/mcp/token`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code"],
+    code_challenge_methods_supported: ["S256"],
+    token_endpoint_auth_methods_supported: ["none"],
+  })
+);
+
 app.all("/mcp", async (c) => {
   const apiKey = extractApiKey(c.req.raw);
   if (!apiKey) {
@@ -24,7 +38,10 @@ app.all("/mcp", async (c) => {
         error:
           "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.",
       },
-      401
+      401,
+      {
+        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="https://mcp.zenrows.com/.well-known/oauth-authorization-server"`,
+      }
     );
   }
 

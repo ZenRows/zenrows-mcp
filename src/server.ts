@@ -18,6 +18,11 @@ export function createServer(apiKey: string): McpServer {
   server.registerTool(
     "scrape",
     {
+      annotations: {
+        title: "Scrape Webpage",
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
       description: `Scrape any webpage and return its content using ZenRows.
 
 Use this tool to fetch webpage content for analysis. By default it returns clean
