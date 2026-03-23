@@ -20,11 +20,13 @@
 ## Quick Start
 
 **Claude Code**
+
 ```bash
 claude mcp add zenrows -e ZENROWS_API_KEY=YOUR_API_KEY -- npx -y @zenrows/mcp
 ```
 
 Or ask your AI assistant naturally once configured:
+
 ```
 Scrape https://example.com and summarize the content.
 ```
@@ -37,22 +39,22 @@ Scrape https://example.com and summarize the content.
 
 Fetches a webpage and returns its content as clean markdown (default), plaintext, raw HTML, PDF, structured JSON, or a screenshot. See the [ZenRows API docs](https://docs.zenrows.com/universal-scraper-api/api-reference#parameter-overview) for full parameter reference.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `url` | string | **required** | Webpage URL to scrape |
-| `js_render` | boolean | `false` | Enable JS rendering for SPAs and dynamic content |
-| `premium_proxy` | boolean | `false` | Use residential proxies to bypass anti-bot systems |
-| `proxy_country` | string | — | ISO 3166-1 alpha-2 country code (e.g. `US`, `GB`). Requires `premium_proxy` |
-| `response_type` | `markdown` \| `plaintext` \| `pdf` \| `html` | `markdown` | Output format. `html` returns raw source (ZenRows default when no param is sent). Ignored when `autoparse`, `css_extractor`, `outputs`, or screenshot params are set |
-| `autoparse` | boolean | — | Auto-extract structured JSON from the page |
-| `css_extractor` | string | — | JSON map of CSS selectors: `{"title":"h1","price":".price"}` |
-| `outputs` | string | — | Comma-separated data types to extract as JSON: `emails`, `headings`, `links`, `menus`, `images`, `videos`, `audios`. Use `*` for all |
-| `screenshot` | boolean | — | Capture an above-the-fold screenshot. Returns an image |
-| `screenshot_fullpage` | boolean | — | Capture a full-page screenshot. Returns an image |
-| `screenshot_selector` | string | — | Capture a screenshot of a specific element via CSS selector |
-| `wait_for` | string | — | CSS selector to wait for before capturing. Requires `js_render` |
-| `wait` | number | — | Milliseconds to wait after load (max 30000). Requires `js_render` |
-| `js_instructions` | string | — | JSON array of browser actions. Requires `js_render` |
+| Parameter             | Type                                         | Default      | Description                                                                                                                                                          |
+| --------------------- | -------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                 | string                                       | **required** | Webpage URL to scrape                                                                                                                                                |
+| `js_render`           | boolean                                      | `false`      | Enable JS rendering for SPAs and dynamic content                                                                                                                     |
+| `premium_proxy`       | boolean                                      | `false`      | Use residential proxies to bypass anti-bot systems                                                                                                                   |
+| `proxy_country`       | string                                       | —            | ISO 3166-1 alpha-2 country code (e.g. `US`, `GB`). Requires `premium_proxy`                                                                                          |
+| `response_type`       | `markdown` \| `plaintext` \| `pdf` \| `html` | `markdown`   | Output format. `html` returns raw source (ZenRows default when no param is sent). Ignored when `autoparse`, `css_extractor`, `outputs`, or screenshot params are set |
+| `autoparse`           | boolean                                      | —            | Auto-extract structured JSON from the page                                                                                                                           |
+| `css_extractor`       | string                                       | —            | JSON map of CSS selectors: `{"title":"h1","price":".price"}`                                                                                                         |
+| `outputs`             | string                                       | —            | Comma-separated data types to extract as JSON: `emails`, `headings`, `links`, `menus`, `images`, `videos`, `audios`. Use `*` for all                                 |
+| `screenshot`          | boolean                                      | —            | Capture an above-the-fold screenshot. Returns an image                                                                                                               |
+| `screenshot_fullpage` | boolean                                      | —            | Capture a full-page screenshot. Returns an image                                                                                                                     |
+| `screenshot_selector` | string                                       | —            | Capture a screenshot of a specific element via CSS selector                                                                                                          |
+| `wait_for`            | string                                       | —            | CSS selector to wait for before capturing. Requires `js_render`                                                                                                      |
+| `wait`                | number                                       | —            | Milliseconds to wait after load (max 30000). Requires `js_render`                                                                                                    |
+| `js_instructions`     | string                                       | —            | JSON array of browser actions. Requires `js_render`                                                                                                                  |
 
 ---
 

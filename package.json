@@ -11,16 +11,31 @@
   ],
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",
+    "clean": "rm -rf dist",
     "dev": "node --env-file=.env --import tsx src/index.ts",
+    "dev:http": "node --env-file=.env --import tsx src/http.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/index.js",
-    "prepare": "npm run build"
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run clean && npm run build && npm run typecheck && npm run lint",
+    "publish-beta": "npm publish --tag beta",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.9",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "hono": "^4.11.4",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "eslint": "^10.0.3",
+    "prettier": "^3.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   },

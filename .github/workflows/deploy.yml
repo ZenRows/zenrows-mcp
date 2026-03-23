@@ -1,0 +1,55 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish:
+    name: npm + GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push to GHCR
+        run: |
+          docker build --platform linux/arm64 \
+            -t ghcr.io/${{ github.repository_owner }}/zenrows-mcp:${{ github.ref_name }} \
+            -t ghcr.io/${{ github.repository_owner }}/zenrows-mcp:latest \
+            .
+          docker push ghcr.io/${{ github.repository_owner }}/zenrows-mcp:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository_owner }}/zenrows-mcp:latest
+
+      - name: Trigger deployment
+        run: |
+          gh api repos/ZenRows/zenrows-mcp-deploy/dispatches \
+            -f event_type=deploy \
+            -f client_payload='{"tag":"${{ github.ref_name }}"}'
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_TRIGGER_PAT }}
