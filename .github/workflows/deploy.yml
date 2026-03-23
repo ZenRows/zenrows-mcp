@@ -40,12 +40,13 @@ jobs:
 
       - name: Build and push to GHCR
         run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           docker build --platform linux/arm64 \
-            -t ghcr.io/${{ github.repository_owner }}/zenrows-mcp:${{ github.ref_name }} \
-            -t ghcr.io/${{ github.repository_owner }}/zenrows-mcp:latest \
+            -t ghcr.io/${OWNER}/zenrows-mcp:${{ github.ref_name }} \
+            -t ghcr.io/${OWNER}/zenrows-mcp:latest \
             .
-          docker push ghcr.io/${{ github.repository_owner }}/zenrows-mcp:${{ github.ref_name }}
-          docker push ghcr.io/${{ github.repository_owner }}/zenrows-mcp:latest
+          docker push ghcr.io/${OWNER}/zenrows-mcp:${{ github.ref_name }}
+          docker push ghcr.io/${OWNER}/zenrows-mcp:latest
 
       - name: Trigger deployment
         run: |
