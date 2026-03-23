@@ -54,6 +54,9 @@ app.all("/mcp", async (c) => {
       401,
       {
         "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="https://mcp.zenrows.com/.well-known/oauth-authorization-server"`,
+        // CloudFront strips WWW-Authenticate — add Link header as RFC 8615 fallback
+        // so MCP clients can still discover the OAuth server
+        "Link": `<https://mcp.zenrows.com/.well-known/oauth-authorization-server>; rel="oauth-authorization-server"`,
       }
     );
   }
