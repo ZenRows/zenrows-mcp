@@ -52,6 +52,6 @@ jobs:
         run: |
           gh api repos/ZenRows/zenrows-mcp-deploy/dispatches \
             -f event_type=deploy \
-            -f client_payload='{"tag":"${{ github.ref_name }}"}'
+            -F client_payload='{"tag":"${{ github.ref_name }}"}'
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_TRIGGER_PAT }}
