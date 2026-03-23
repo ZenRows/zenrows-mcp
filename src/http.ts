@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "./server.js";
@@ -6,6 +7,18 @@ import { createServer } from "./server.js";
 // ─── app ──────────────────────────────────────────────────────────────────────
 
 const app = new Hono();
+
+// CORS — required for browser-side MCP clients (Claude.ai, Cursor web, etc.)
+// All origins allowed: the API key is the auth mechanism, not the origin.
+app.use(
+  cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["Authorization", "Content-Type", "Accept", "Mcp-Session-Id"],
+    exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
+    maxAge: 86_400,
+  })
+);
 
 function extractApiKey(req: Request): string | undefined {
   const auth = req.headers.get("authorization");
