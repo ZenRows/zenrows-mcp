@@ -252,5 +252,79 @@ Examples:
     }
   );
 
+  // ─── prompts ───────────────────────────────────────────────────────────────
+
+  server.registerPrompt(
+    "scrape_and_summarize",
+    {
+      title: "Scrape and Summarize",
+      description: "Scrape a webpage and return a concise summary of its content.",
+      argsSchema: {
+        url: z.string().url().describe("The webpage URL to scrape and summarize"),
+      },
+    },
+    ({ url }) => ({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Scrape ${url} using the ZenRows MCP scrape tool and provide a concise summary of the main content. Include key points, headings, and any important data found on the page.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.registerPrompt(
+    "extract_structured_data",
+    {
+      title: "Extract Structured Data",
+      description: "Scrape a webpage and extract specific structured data using CSS selectors.",
+      argsSchema: {
+        url: z.string().url().describe("The webpage URL to extract data from"),
+        fields: z
+          .string()
+          .describe(
+            'JSON object mapping field names to CSS selectors, e.g. \'{"title":"h1","price":".price"}\''
+          ),
+      },
+    },
+    ({ url, fields }) => ({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Scrape ${url} using the ZenRows MCP scrape tool with css_extractor set to ${fields}. Return the extracted data as a clean JSON object.`,
+          },
+        },
+      ],
+    })
+  );
+
+  server.registerPrompt(
+    "scrape_js_page",
+    {
+      title: "Scrape JavaScript-Rendered Page",
+      description:
+        "Scrape a page that requires JavaScript rendering (React, Vue, Angular, or any SPA).",
+      argsSchema: {
+        url: z.string().url().describe("The JavaScript-rendered page URL to scrape"),
+      },
+    },
+    ({ url }) => ({
+      messages: [
+        {
+          role: "user",
+          content: {
+            type: "text",
+            text: `Scrape ${url} using the ZenRows MCP scrape tool with js_render set to true. The page requires JavaScript execution to load its content. Return the full rendered content in markdown format.`,
+          },
+        },
+      ],
+    })
+  );
+
   return server;
 }

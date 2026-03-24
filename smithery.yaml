@@ -15,3 +15,26 @@ startCommand:
       args: ["dist/index.js"],
       env: { ZENROWS_API_KEY: config.apiKey }
     })
+
+remote:
+  type: http
+  url: https://mcp.zenrows.com/mcp
+  configSchema:
+    type: object
+    properties:
+      js_render:
+        type: boolean
+        title: JavaScript Rendering
+        description: Enable JavaScript rendering by default for all scrape requests. Useful for SPAs and dynamic pages.
+        default: false
+      premium_proxy:
+        type: boolean
+        title: Premium Proxy
+        description: Use premium residential proxies by default. Bypasses advanced anti-bot protection.
+        default: false
+      response_type:
+        type: string
+        title: Default Response Type
+        description: Default output format for scraped content.
+        enum: [markdown, plaintext, html]
+        default: markdown
