@@ -7,6 +7,11 @@ const pkg = require("../package.json") as { version: string };
 
 const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 
+const DEFAULT_JS_RENDER = process.env.ZENROWS_JS_RENDER === "true";
+const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
+const DEFAULT_RESPONSE_TYPE =
+  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
+
 export function createServer(apiKey: string): McpServer {
   const server = new McpServer({
     name: "zenrows",
@@ -168,12 +173,13 @@ Examples:
 
       if (
         params.js_render ||
+        DEFAULT_JS_RENDER ||
         params.screenshot ||
         params.screenshot_fullpage ||
         params.screenshot_selector
       )
         searchParams.set("js_render", "true");
-      if (params.premium_proxy) searchParams.set("premium_proxy", "true");
+      if (params.premium_proxy || DEFAULT_PREMIUM_PROXY) searchParams.set("premium_proxy", "true");
       if (params.proxy_country)
         searchParams.set("proxy_country", params.proxy_country.toUpperCase());
       if (params.autoparse) searchParams.set("autoparse", "true");
@@ -192,7 +198,7 @@ Examples:
       // 'html' is the ZenRows default (no param); all other values are passed through.
       const isScreenshot =
         params.screenshot || params.screenshot_fullpage || params.screenshot_selector;
-      const effectiveType = params.response_type ?? "markdown";
+      const effectiveType = params.response_type ?? DEFAULT_RESPONSE_TYPE;
       if (
         !params.autoparse &&
         !params.css_extractor &&

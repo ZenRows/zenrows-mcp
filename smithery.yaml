@@ -9,11 +9,32 @@ startCommand:
         type: string
         title: ZenRows API Key
         description: Your ZenRows API key from app.zenrows.com/register
+      js_render:
+        type: boolean
+        title: JavaScript Rendering
+        description: Enable JavaScript rendering by default for all scrape requests. Useful for SPAs and dynamic pages.
+        default: false
+      premium_proxy:
+        type: boolean
+        title: Premium Proxy
+        description: Use premium residential proxies by default. Bypasses advanced anti-bot protection.
+        default: false
+      response_type:
+        type: string
+        title: Default Response Type
+        description: Default output format for scraped content.
+        enum: [markdown, plaintext, html]
+        default: markdown
   commandFunction: |-
     (config) => ({
       command: "node",
       args: ["dist/index.js"],
-      env: { ZENROWS_API_KEY: config.apiKey }
+      env: {
+        ZENROWS_API_KEY: config.apiKey,
+        ZENROWS_JS_RENDER: String(config.js_render ?? false),
+        ZENROWS_PREMIUM_PROXY: String(config.premium_proxy ?? false),
+        ZENROWS_RESPONSE_TYPE: config.response_type ?? "markdown"
+      }
     })
 
 remote:
