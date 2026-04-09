@@ -23,7 +23,7 @@ jobs:
           cache: "npm"
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm install -g npm@latest
+      - run: npm install -g npm@10
 
       - run: npm ci
 
