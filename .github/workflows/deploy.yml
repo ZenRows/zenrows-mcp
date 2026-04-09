@@ -21,8 +21,7 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-
-      - run: npm install -g npm@10
+          registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
 
