@@ -27,7 +27,9 @@ jobs:
 
       - run: npm run build
 
-      - run: npx --yes npm@11.2 publish --access public --provenance
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
