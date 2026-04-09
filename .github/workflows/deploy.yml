@@ -23,13 +23,11 @@ jobs:
           cache: "npm"
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm install -g npm@latest
-
       - run: npm ci
 
       - run: npm run build
 
-      - run: npm publish --access public --provenance
+      - run: npx --yes npm@11.2 publish --access public --provenance
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
