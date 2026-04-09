@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { registerBrowserTools } from "./tools/browser.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -331,6 +332,11 @@ Examples:
       ],
     })
   );
+
+  const BROWSER_URL = process.env.ZENROWS_BROWSER_URL;
+  if (BROWSER_URL) {
+    registerBrowserTools(server, apiKey, BROWSER_URL);
+  }
 
   return server;
 }
