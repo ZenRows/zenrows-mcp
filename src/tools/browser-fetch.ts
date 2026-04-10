@@ -26,7 +26,8 @@ export async function browserFetch(
   const response = await fetch(url, init);
   let data: unknown;
   const contentType = response.headers.get("content-type") ?? "";
-  data = contentType.includes("application/json") ? await response.json() : await response.text();
+  const text = await response.text();
+  data = contentType.includes("application/json") && text ? JSON.parse(text) : text;
 
   return { ok: response.ok, status: response.status, data };
 }
