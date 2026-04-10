@@ -92,7 +92,8 @@ app.all("/browser/*", async (c) => {
     method: c.req.method,
     headers: c.req.raw.headers,
     body: c.req.raw.body,
-  });
+    duplex: "half",
+  } as RequestInit);
   const res = await fetch(req);
   return new Response(res.body, { status: res.status, headers: res.headers });
 });
