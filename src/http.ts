@@ -79,6 +79,24 @@ app.post("/register", async (c) => {
   );
 });
 
+// Proxy browser tool calls to internal service.
+// npx clients default ZENROWS_BROWSER_URL to https://mcp.zenrows.com, so their
+// /browser/* calls are forwarded here and proxied to the internal service.
+const BROWSER_URL = process.env.ZENROWS_BROWSER_URL;
+app.all("/browser/*", async (c) => {
+  if (!BROWSER_URL) {
+    return c.json({ error: "Browser service not available." }, 503);
+  }
+  const target = `${BROWSER_URL.replace(/\/$/, "")}${c.req.path}`;
+  const req = new Request(target, {
+    method: c.req.method,
+    headers: c.req.raw.headers,
+    body: c.req.raw.body,
+  });
+  const res = await fetch(req);
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
 app.all("/mcp", async (c) => {
   const apiKey = extractApiKey(c.req.raw);
   if (!apiKey) {

@@ -333,10 +333,8 @@ Examples:
     })
   );
 
-  const BROWSER_URL = process.env.ZENROWS_BROWSER_URL;
-  if (BROWSER_URL) {
-    registerBrowserTools(server, apiKey, BROWSER_URL);
-  }
+  const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
+  registerBrowserTools(server, apiKey, BROWSER_URL);
 
   return server;
 }
