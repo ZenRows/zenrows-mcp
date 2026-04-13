@@ -19,9 +19,9 @@ function json(data: unknown): { content: TextContent[] } {
 
 const sessionId = z.string().describe("Session ID returned by browser_navigate");
 
-export function registerBrowserTools(server: McpServer, apiKey: string, browserUrl: string): void {
-  const fetch = (method: string, path: string, body?: unknown) =>
-    browserFetch(method, path, apiKey, browserUrl, body);
+export function registerBrowserTools(server: McpServer, apiKey: string, browserUrl: string, mcpServer: McpServer): void {
+  const tfetch = (toolName: string) => (method: string, path: string, body?: unknown) =>
+    browserFetch(method, path, apiKey, browserUrl, body, mcpServer.server.getClientVersion()?.name, toolName);
 
   // ─── Session ─────────────────────────────────────────────────────────────
 
@@ -50,6 +50,7 @@ When to use options:
       },
     },
     async (params) => {
+      const fetch = tfetch("browser_navigate");
       let result;
       try {
         result = await fetch("POST", "/browser/sessions", {
@@ -88,6 +89,7 @@ When to use options:
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_close");
       try {
         const result = await fetch("DELETE", `/browser/sessions/${session_id}`);
         if (!result.ok) return err(`Failed to close session: ${browserError(result)}`);
@@ -108,6 +110,7 @@ When to use options:
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_go_back");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/go_back`);
         if (!result.ok) return err(`Go back failed: ${browserError(result)}`);
@@ -126,6 +129,7 @@ When to use options:
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_go_forward");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/go_forward`);
         if (!result.ok) return err(`Go forward failed: ${browserError(result)}`);
@@ -144,6 +148,7 @@ When to use options:
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_reload");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/reload`);
         if (!result.ok) return err(`Reload failed: ${browserError(result)}`);
@@ -167,6 +172,7 @@ When to use options:
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_click");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/click`, { selector });
         if (!result.ok) return err(`Click failed: ${browserError(result)}`);
@@ -188,6 +194,7 @@ When to use options:
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_hover");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/hover`, { selector });
         if (!result.ok) return err(`Hover failed: ${browserError(result)}`);
@@ -211,6 +218,7 @@ When to use options:
       },
     },
     async ({ session_id, selector, text, clear_first }) => {
+      const fetch = tfetch("browser_type");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/type`, { selector, text, clear_first });
         if (!result.ok) return err(`Type failed: ${browserError(result)}`);
@@ -233,6 +241,7 @@ When to use options:
       },
     },
     async ({ session_id, selector, value }) => {
+      const fetch = tfetch("browser_fill");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/fill`, { selector, value });
         if (!result.ok) return err(`Fill failed: ${browserError(result)}`);
@@ -255,6 +264,7 @@ When to use options:
       },
     },
     async ({ session_id, selector, value }) => {
+      const fetch = tfetch("browser_select_option");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/select`, { selector, value });
         if (!result.ok) return err(`Select failed: ${browserError(result)}`);
@@ -276,6 +286,7 @@ When to use options:
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_check");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/check`, { selector });
         if (!result.ok) return err(`Check failed: ${browserError(result)}`);
@@ -297,6 +308,7 @@ When to use options:
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_uncheck");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/uncheck`, { selector });
         if (!result.ok) return err(`Uncheck failed: ${browserError(result)}`);
@@ -318,6 +330,7 @@ When to use options:
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_focus");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/focus`, { selector });
         if (!result.ok) return err(`Focus failed: ${browserError(result)}`);
@@ -339,6 +352,7 @@ When to use options:
       },
     },
     async ({ session_id, key }) => {
+      const fetch = tfetch("browser_press_key");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/press_key`, { key });
         if (!result.ok) return err(`Key press failed: ${browserError(result)}`);
@@ -361,6 +375,7 @@ When to use options:
       },
     },
     async ({ session_id, direction, distance }) => {
+      const fetch = tfetch("browser_scroll");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/scroll`, { direction, distance });
         if (!result.ok) return err(`Scroll failed: ${browserError(result)}`);
@@ -383,6 +398,7 @@ When to use options:
       },
     },
     async ({ session_id, source_selector, target_selector }) => {
+      const fetch = tfetch("browser_drag");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/drag`, {
           source_selector,
@@ -413,6 +429,7 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_get_accessibility_tree");
       try {
         const result = await fetch("GET", `/browser/sessions/${session_id}/accessibility_tree`);
         if (!result.ok) return err(`Failed to get accessibility tree: ${browserError(result)}`);
@@ -432,6 +449,7 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_get_url");
       try {
         const result = await fetch("GET", `/browser/sessions/${session_id}/url`);
         if (!result.ok) return err(`Failed to get URL: ${browserError(result)}`);
@@ -450,6 +468,7 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_get_title");
       try {
         const result = await fetch("GET", `/browser/sessions/${session_id}/title`);
         if (!result.ok) return err(`Failed to get title: ${browserError(result)}`);
@@ -471,6 +490,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_get_text");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/get_text`, { selector });
         if (!result.ok) return err(`Failed to get text: ${browserError(result)}`);
@@ -494,6 +514,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, selector, attribute }) => {
+      const fetch = tfetch("browser_get_attribute");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/get_attribute`, { selector, attribute });
         if (!result.ok) return err(`Failed to get attribute: ${browserError(result)}`);
@@ -515,6 +536,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_get_html");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/get_html`, { selector });
         if (!result.ok) return err(`Failed to get HTML: ${browserError(result)}`);
@@ -537,6 +559,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, selector }) => {
+      const fetch = tfetch("browser_query_selector_all");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/query_selector_all`, { selector });
         if (!result.ok) return err(`Query failed: ${browserError(result)}`);
@@ -564,6 +587,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, full_page, selector }) => {
+      const fetch = tfetch("browser_screenshot");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/screenshot`, { full_page, selector });
         if (!result.ok) return err(`Screenshot failed: ${browserError(result)}`);
@@ -596,6 +620,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, print_background, landscape, scale }) => {
+      const fetch = tfetch("browser_generate_pdf");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/generate_pdf`, { print_background, landscape, scale });
         if (!result.ok) return err(`PDF generation failed: ${browserError(result)}`);
@@ -632,6 +657,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, selector, visible }) => {
+      const fetch = tfetch("browser_wait_for_selector");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/wait_for_selector`, { selector, visible });
         if (!result.ok) return err(`Wait for selector failed: ${browserError(result)}`);
@@ -653,6 +679,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, timeout_ms }) => {
+      const fetch = tfetch("browser_wait_for_navigation");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/wait_for_navigation`, timeout_ms ? { timeout_ms } : undefined);
         if (!result.ok) return err(`Wait for navigation failed: ${browserError(result)}`);
@@ -674,6 +701,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, ms }) => {
+      const fetch = tfetch("browser_wait");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/wait`, { ms });
         if (!result.ok) return err(`Wait failed: ${browserError(result)}`);
@@ -697,6 +725,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, script }) => {
+      const fetch = tfetch("browser_evaluate");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/evaluate`, { script });
         if (!result.ok) return err(`Evaluate failed: ${browserError(result)}`);
@@ -717,6 +746,7 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_get_cookies");
       try {
         const result = await fetch("GET", `/browser/sessions/${session_id}/cookies`);
         if (!result.ok) return err(`Failed to get cookies: ${browserError(result)}`);
@@ -750,6 +780,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, cookies }) => {
+      const fetch = tfetch("browser_set_cookies");
       try {
         // Remap http_only → httpOnly to match Chrome DevTools Protocol / Rod's JSON field names.
         const mapped = cookies.map(({ http_only, ...rest }) => ({ ...rest, httpOnly: http_only }));
@@ -770,6 +801,7 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
+      const fetch = tfetch("browser_clear_cookies");
       try {
         const result = await fetch("DELETE", `/browser/sessions/${session_id}/cookies`);
         if (!result.ok) return err(`Failed to clear cookies: ${browserError(result)}`);
@@ -795,6 +827,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, action, key, value }) => {
+      const fetch = tfetch("browser_local_storage");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/local_storage`, { action, key, value });
         if (!result.ok) return err(`Local storage operation failed: ${browserError(result)}`);
@@ -818,6 +851,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, url }) => {
+      const fetch = tfetch("browser_new_tab");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/new_tab`, { url });
         if (!result.ok) return err(`Failed to open new tab: ${browserError(result)}`);
@@ -839,6 +873,7 @@ labels, and states — everything needed to drive browser interactions.`,
       },
     },
     async ({ session_id, tab_id }) => {
+      const fetch = tfetch("browser_switch_tab");
       try {
         const result = await fetch("POST", `/browser/sessions/${session_id}/switch_tab`, { tab_id });
         if (!result.ok) return err(`Failed to switch tab: ${browserError(result)}`);
@@ -883,7 +918,7 @@ labels, and states — everything needed to drive browser interactions.`,
 
   type BatchAction = z.infer<typeof batchAction>;
 
-  async function runAction(action: BatchAction, session_id: string): Promise<unknown> {
+  async function runAction(action: BatchAction, session_id: string, fetch: ReturnType<typeof tfetch>): Promise<unknown> {
     const sid = session_id;
     switch (action.type) {
       case "navigate": {
@@ -1050,12 +1085,13 @@ For proper image rendering, use browser_screenshot directly.`,
       },
     },
     async ({ session_id, actions, stop_on_error = true }) => {
+      const fetch = tfetch("browser_batch");
       const results: Array<{ step: number; type: string; result?: unknown; error?: string }> = [];
 
       for (let i = 0; i < actions.length; i++) {
         const action = actions[i];
         try {
-          const result = await runAction(action, session_id);
+          const result = await runAction(action, session_id, fetch);
           results.push({ step: i, type: action.type, result });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

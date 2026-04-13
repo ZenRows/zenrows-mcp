@@ -11,12 +11,20 @@ export async function browserFetch(
   path: string,
   apiKey: string,
   browserUrl: string,
-  body?: unknown
+  body?: unknown,
+  clientName?: string,
+  toolName?: string,
 ): Promise<BrowserFetchResult> {
   const url = `${browserUrl.replace(/\/$/, "")}${path}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    ...(clientName ? { "x-mcp-client-name": clientName } : {}),
+    ...(toolName ? { "x-mcp-tool": toolName } : {}),
+  };
   const init: RequestInit = {
     method,
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    headers,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   };
   if (body !== undefined) {

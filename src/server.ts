@@ -212,8 +212,13 @@ Examples:
 
       let response: Response;
       try {
+        const clientName = server.server.getClientVersion()?.name;
         response = await fetch(`${ZENROWS_API_URL}?${searchParams}`, {
-          headers: { "User-Agent": `zenrows/mcp ${pkg.version}` },
+          headers: {
+            "User-Agent": `zenrows/mcp ${pkg.version}`,
+            ...(clientName ? { "x-mcp-client-name": clientName } : {}),
+            "x-mcp-tool": "scrape",
+          },
         });
       } catch (err) {
         return {
@@ -334,7 +339,7 @@ Examples:
   );
 
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
-  registerBrowserTools(server, apiKey, BROWSER_URL);
+  registerBrowserTools(server, apiKey, BROWSER_URL, server);
 
   return server;
 }
