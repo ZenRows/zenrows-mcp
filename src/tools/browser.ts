@@ -19,9 +19,9 @@ function json(data: unknown): { content: TextContent[] } {
 
 const sessionId = z.string().describe("Session ID returned by browser_navigate");
 
-export function registerBrowserTools(server: McpServer, apiKey: string, browserUrl: string, mcpServer: McpServer): void {
+export function registerBrowserTools(server: McpServer, apiKey: string, browserUrl: string, getClientName: () => string | undefined): void {
   const tfetch = (toolName: string) => (method: string, path: string, body?: unknown) =>
-    browserFetch(method, path, apiKey, browserUrl, body, mcpServer.server.getClientVersion()?.name, toolName);
+    browserFetch(method, path, apiKey, browserUrl, body, getClientName(), toolName);
 
   // ─── Session ─────────────────────────────────────────────────────────────
 

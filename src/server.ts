@@ -13,11 +13,15 @@ const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
   (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
 
-export function createServer(apiKey: string): McpServer {
+export function createServer(apiKey: string, clientName?: string): McpServer {
   const server = new McpServer({
     name: "zenrows",
     version: pkg.version,
   });
+
+  // Resolve client name: prefer explicit value (HTTP stateless path),
+  // fall back to MCP handshake (stdio/persistent connection path).
+  const getClientName = () => clientName ?? server.server.getClientVersion()?.name;
 
   // ─── scrape ────────────────────────────────────────────────────────────────
 
@@ -212,11 +216,10 @@ Examples:
 
       let response: Response;
       try {
-        const clientName = server.server.getClientVersion()?.name;
         response = await fetch(`${ZENROWS_API_URL}?${searchParams}`, {
           headers: {
             "User-Agent": `zenrows/mcp ${pkg.version}`,
-            ...(clientName ? { "x-mcp-client-name": clientName } : {}),
+            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
             "x-mcp-tool": "scrape",
           },
         });
@@ -339,7 +342,7 @@ Examples:
   );
 
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
-  registerBrowserTools(server, apiKey, BROWSER_URL, server);
+  registerBrowserTools(server, apiKey, BROWSER_URL, getClientName);
 
   return server;
 }
