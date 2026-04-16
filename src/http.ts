@@ -8,10 +8,6 @@ import { createServer } from "./server.js";
 
 const app = new Hono();
 
-// Cache MCP client name per API key across invocations.
-// Populated from the clientInfo field in MCP initialize requests.
-const mcpClientCache = new Map<string, string>();
-
 // CORS — required for browser-side MCP clients (Claude.ai, Cursor web, etc.)
 // All origins allowed: the API key is the auth mechanism, not the origin.
 app.use(
@@ -124,16 +120,9 @@ app.all("/mcp", async (c) => {
     sessionIdGenerator: undefined, // stateless — no session tracking between requests
     enableJsonResponse: true, // return JSON instead of SSE (simpler for Lambda + most MCP clients)
   });
-  // Use cached client name from a prior initialize request (stateless transport
-  // creates a new server per request, so getClientVersion() is only set during
-  // the initialize request itself, not during subsequent tool calls).
-  const server = createServer(apiKey, mcpClientCache.get(apiKey));
+  const server = createServer(apiKey, c.req.raw.headers.get("user-agent") ?? undefined);
   await server.connect(transport);
   const response = await transport.handleRequest(c.req.raw);
-  // If this was an initialize request, getClientVersion() is now set — cache it
-  // so subsequent tool call requests can include x-mcp-client-name.
-  const resolvedName = server.server.getClientVersion()?.name;
-  if (resolvedName) mcpClientCache.set(apiKey, resolvedName);
   await transport.close();
   return response;
 });
