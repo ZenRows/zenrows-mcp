@@ -5,202 +5,90 @@
   </picture>
 </p>
 
-<p align="center">
-  Model Context Protocol server for the <a href="https://www.zenrows.com/products/universal-scraper">ZenRows Universal Scraper API</a>.<br>
-  Give any MCP-compatible AI assistant the ability to scrape any webpage — including JavaScript-rendered content and anti-bot protected sites.
-</p>
+# ZenRows MCP Server
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@zenrows/mcp"><img src="https://img.shields.io/npm/v/@zenrows/mcp" alt="npm version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
-</p>
+The ZenRows MCP (Model Context Protocol) server is the standard way AI systems use ZenRows. A single connection gives your AI assistant, agent, or application real-time access to any website.
 
----
+[![npm version](https://img.shields.io/npm/v/@zenrows/mcp)](https://www.npmjs.com/package/@zenrows/mcp)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ZenRows/zenrows-mcp/blob/main/LICENSE)
 
-## Quick Start
-
-**Claude Code**
-
-```bash
-claude mcp add zenrows -e ZENROWS_API_KEY=YOUR_API_KEY -- npx -y @zenrows/mcp
-```
-
-Or ask your AI assistant naturally once configured:
-
-```
-Scrape https://example.com and summarize the content.
-```
+📚 **Full documentation:** [docs.zenrows.com/integrations/mcp/mcp-overview](https://docs.zenrows.com/integrations/mcp/mcp-overview)
 
 ---
 
-## Tool
+## Why ZenRows MCP
 
-### `scrape`
-
-Fetches a webpage and returns its content as clean markdown (default), plaintext, raw HTML, PDF, structured JSON, or a screenshot. See the [ZenRows API docs](https://docs.zenrows.com/universal-scraper-api/api-reference#parameter-overview) for full parameter reference.
-
-| Parameter             | Type                                         | Default      | Description                                                                                                                                                          |
-| --------------------- | -------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`                 | string                                       | **required** | Webpage URL to scrape                                                                                                                                                |
-| `js_render`           | boolean                                      | `false`      | Enable JS rendering for SPAs and dynamic content                                                                                                                     |
-| `premium_proxy`       | boolean                                      | `false`      | Use residential proxies to bypass anti-bot systems                                                                                                                   |
-| `proxy_country`       | string                                       | —            | ISO 3166-1 alpha-2 country code (e.g. `US`, `GB`). Requires `premium_proxy`                                                                                          |
-| `response_type`       | `markdown` \| `plaintext` \| `pdf` \| `html` | `markdown`   | Output format. `html` returns raw source (ZenRows default when no param is sent). Ignored when `autoparse`, `css_extractor`, `outputs`, or screenshot params are set |
-| `autoparse`           | boolean                                      | —            | Auto-extract structured JSON from the page                                                                                                                           |
-| `css_extractor`       | string                                       | —            | JSON map of CSS selectors: `{"title":"h1","price":".price"}`                                                                                                         |
-| `outputs`             | string                                       | —            | Comma-separated data types to extract as JSON: `emails`, `headings`, `links`, `menus`, `images`, `videos`, `audios`. Use `*` for all                                 |
-| `screenshot`          | boolean                                      | —            | Capture an above-the-fold screenshot. Returns an image                                                                                                               |
-| `screenshot_fullpage` | boolean                                      | —            | Capture a full-page screenshot. Returns an image                                                                                                                     |
-| `screenshot_selector` | string                                       | —            | Capture a screenshot of a specific element via CSS selector                                                                                                          |
-| `wait_for`            | string                                       | —            | CSS selector to wait for before capturing. Requires `js_render`                                                                                                      |
-| `wait`                | number                                       | —            | Milliseconds to wait after load (max 30000). Requires `js_render`                                                                                                    |
-| `js_instructions`     | string                                       | —            | JSON array of browser actions. Requires `js_render`                                                                                                                  |
+- **Reach sites that normally block bots.** Get access to any website at scale without getting blocked by anti-bot systems.
+- **Managed scraping infrastructure.** Proxy rotation, headless browser orchestration, anti-bot evasion, and session management run on ZenRows infrastructure.
+- **Plug into any AI you already use.** Works with any MCP client, including AI assistants, agent frameworks, AI SDKs, IDE plugins, and custom applications.
+- **Plain English, no scraping code.** Describe the task naturally and the AI picks the right tool. No selectors, no proxy management, no anti-bot tuning.
 
 ---
 
-## When to use which options
+## Quick start
 
-**Content doesn't appear or page is blank**
-→ Enable `js_render: true`. The page likely uses React, Vue, or Angular.
+ZenRows MCP supports two transport options. Both expose the same set of tools and capabilities. Pick the one that fits your client.
 
-**Getting 403 or blocked errors**
-→ Add `premium_proxy: true`. For geo-restricted content, also set `proxy_country`.
+### Remote MCP server
 
-**Content loads after a delay or interaction**
-→ Use `wait_for` (CSS selector) or `wait` (milliseconds) with `js_render: true`.
-→ For clicks or form inputs before scraping, use `js_instructions`.
+Use the hosted ZenRows MCP server when your AI application calls an LLM API directly. The server runs on ZenRows infrastructure, so there is nothing to install, configure, or update.
 
-**Only need specific data, not the full page**
-→ Use `css_extractor` with a JSON map of selectors for precise extraction.
-→ Use `autoparse` for structured pages like products or articles.
-→ Use `outputs` to pull links, emails, images, or other content types.
+**Server URL:**
 
-**Need to verify what the page looks like**
-→ Use `screenshot` or `screenshot_fullpage` for visual debugging.
-→ Use `screenshot_selector` to capture a specific element.
-
----
-
-## Installation
-
-### Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
-
-```json
-{
-  "mcpServers": {
-    "zenrows": {
-      "command": "npx",
-      "args": ["-y", "@zenrows/mcp"],
-      "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
-      }
-    }
-  }
-}
+```
+https://mcp.zenrows.com/mcp
 ```
 
-### Claude Code
+**Transport:** Streamable HTTP
 
-```bash
-claude mcp add zenrows -e ZENROWS_API_KEY=YOUR_API_KEY -- npx -y @zenrows/mcp
+**Authentication:** OAuth-based. Pass your ZenRows API key as a Bearer token in the `Authorization` header on every request.
+
+```
+Authorization: Bearer YOUR_ZENROWS_API_KEY
 ```
 
-Or add to your project's `.mcp.json`:
+Most MCP clients accept this through an `authorization` shorthand field on the tool config and forward it as the Bearer token automatically. Some clients use a free-form `headers` field instead. Either approach works.
 
-```json
-{
-  "mcpServers": {
-    "zenrows": {
-      "command": "npx",
-      "args": ["-y", "@zenrows/mcp"],
-      "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
-      }
-    }
-  }
-}
-```
+#### Example: OpenAI Responses API
 
-### Cursor
+```python
+import os
+from openai import OpenAI
 
-Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+ZENROWS_API_KEY = os.environ["ZENROWS_API_KEY"]
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-```json
-{
-  "mcpServers": {
-    "zenrows": {
-      "command": "npx",
-      "args": ["-y", "@zenrows/mcp"],
-      "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
-      }
-    }
-  }
-}
-```
-
-### Windsurf
-
-Edit `~/.codeium/windsurf/mcp_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "zenrows": {
-      "command": "npx",
-      "args": ["-y", "@zenrows/mcp"],
-      "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
-      }
-    }
-  }
-}
-```
-
-### VS Code (GitHub Copilot)
-
-Edit `.vscode/mcp.json` in your project:
-
-```json
-{
-  "servers": {
-    "zenrows": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "@zenrows/mcp"],
-      "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
-      }
-    }
-  }
-}
-```
-
-### Zed
-
-Edit `~/.config/zed/settings.json`:
-
-```json
-{
-  "context_servers": {
-    "zenrows": {
-      "command": {
-        "path": "npx",
-        "args": ["-y", "@zenrows/mcp"],
-        "env": {
-          "ZENROWS_API_KEY": "YOUR_API_KEY"
+response = client.responses.create(
+    model="gpt-5",
+    tools=[
+        {
+            "type": "mcp",
+            "server_label": "zenrows",
+            "server_description": "Web scraping MCP server for accessing live web content.",
+            "server_url": "https://mcp.zenrows.com/mcp",
+            "authorization": ZENROWS_API_KEY,
+            "require_approval": "never",
         }
-      }
-    }
-  }
-}
+    ],
+    input="Visit https://news.ycombinator.com/ and summarize the three most recent posts.",
+)
+
+print(response.output_text)
 ```
 
-### JetBrains IDEs
+For the full walkthrough with framework-specific examples, see the [Remote MCP server docs](https://docs.zenrows.com/integrations/mcp/mcp-overview#remote-mcp-server).
 
-Go to **Settings → Tools → AI Assistant → Model Context Protocol** and add:
+### Local MCP server
+
+Use the local stdio configuration when your MCP client runs the server as a local subprocess instead of calling a remote URL. This is the standard setup for desktop AI tools and IDE plugins, including Claude Desktop, Claude Code, Cursor, Windsurf, VS Code, Zed, and JetBrains IDEs.
+
+**Package:** [`@zenrows/mcp`](https://www.npmjs.com/package/@zenrows/mcp) on npm
+
+**Authentication:** API key via the `ZENROWS_API_KEY` environment variable.
+
+**Requirements:** [Node.js](https://nodejs.org/) installed (for `npx` to work).
+
+**Configuration:**
 
 ```json
 {
@@ -209,30 +97,27 @@ Go to **Settings → Tools → AI Assistant → Model Context Protocol** and add
       "command": "npx",
       "args": ["-y", "@zenrows/mcp"],
       "env": {
-        "ZENROWS_API_KEY": "YOUR_API_KEY"
+        "ZENROWS_API_KEY": "YOUR_ZENROWS_API_KEY"
       }
     }
   }
 }
 ```
 
+The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/integrations/mcp/mcp-overview#per-client-setup-guides) for the file path for your client.
+
 ---
 
-## Examples
+## Tools
 
-Once configured, ask your AI assistant naturally:
+The ZenRows MCP exposes two families of tools:
 
-```
-Scrape the pricing page at https://zenrows.com/pricing and summarize the plans.
+- **`scrape`**: single-request fetch returning Markdown, plain text, HTML, JSON, PDF, or screenshot. Backed by the [Universal Scraper API](https://docs.zenrows.com/universal-scraper-api/api-reference).
+- **`browser_*`**: 30+ tools for full browser automation including navigation, clicks, form fills, JavaScript execution, cookies, tabs, and persistent sessions. Backed by the [Scraping Browser](https://docs.zenrows.com/scraping-browser/introduction).
 
-Fetch https://example.com/ — it's a React SPA, so enable JS rendering.
+The AI selects the right tool from your prompt. You don't call tools directly in code.
 
-Get the top 5 results from https://www.scrapingcourse.com/ecommerce/ and extract just the product names and prices.
-
-Take a full-page screenshot of https://news.ycombinator.com to see the current layout.
-
-Scrape https://protected-site.com — it keeps blocking me, use premium proxies.
-```
+See the [full tool reference](https://docs.zenrows.com/integrations/mcp/mcp-overview#tools) for every tool, parameter, and return value.
 
 ---
 
@@ -242,8 +127,26 @@ Scrape https://protected-site.com — it keeps blocking me, use premium proxies.
 git clone https://github.com/ZenRows/zenrows-mcp
 cd zenrows-mcp
 npm install
-cp .env.example .env   # add your API key
-npm run dev            # run with .env loaded (requires Node 20.6+)
-npm run build          # compile to dist/
-npm run inspect        # open MCP inspector UI
+cp .env.example .env   # Add your API key
+npm run dev            # Run with .env loaded (requires Node.js 20.6+)
+npm run build          # Compile to dist/
+npm run inspect        # Open the MCP inspector UI
 ```
+
+Pull requests and issues are welcome.
+
+---
+
+## Resources
+
+- [Full ZenRows MCP documentation](https://docs.zenrows.com/integrations/mcp/mcp-overview)
+- [ZenRows Universal Scraper API](https://docs.zenrows.com/universal-scraper-api/api-reference)
+- [ZenRows Scraping Browser](https://docs.zenrows.com/scraping-browser/introduction)
+- [npm package](https://www.npmjs.com/package/@zenrows/mcp)
+- [Get your API key](https://app.zenrows.com/register)
+
+---
+
+## License
+
+[MIT](LICENSE)
