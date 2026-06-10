@@ -119,6 +119,13 @@ The AI selects the right tool from your prompt. You don't call tools directly in
 
 See the [full tool reference](https://docs.zenrows.com/integrations/mcp/mcp-overview#tools) for every tool, parameter, and return value.
 
+### Credentials & scopes
+
+Authenticate with either a ZenRows API key or a **scoped agent credential** (obtained via OAuth — e.g. `npx zenrows login`, or the MCP OAuth flow this server advertises at `/.well-known/oauth-*`). Present it as `Authorization: Bearer <credential>` or `?apikey=<credential>`.
+
+- **API keys** have full account access (unchanged behavior).
+- **Agent credentials** are scoped: the server introspects them and enforces per-tool scopes. `scrape` needs `scrape:write` (plus `extract:json` for structured extraction); `browser_*` needs `browser:session_write` (a production scope that requires approval). A call missing a scope returns an `insufficient_scope` error pointing to **Settings → Agents**. Configurable via `ZENROWS_INTROSPECTION_URL`.
+
 ---
 
 ## Development
