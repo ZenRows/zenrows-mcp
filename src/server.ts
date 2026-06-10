@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { guardScopes, scrapeScopes } from "./auth.js";
 import { registerBrowserTools } from "./tools/browser.js";
 
 const require = createRequire(import.meta.url);
@@ -11,7 +12,8 @@ const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 const DEFAULT_JS_RENDER = process.env.ZENROWS_JS_RENDER === "true";
 const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
-  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
+  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ??
+  "markdown";
 
 export function createServer(apiKey: string, clientName?: string): McpServer {
   const server = new McpServer({
@@ -171,6 +173,11 @@ Examples:
       },
     },
     async (params) => {
+      const denial = await guardScopes(apiKey, scrapeScopes(params));
+      if (denial) {
+        return { content: [{ type: "text" as const, text: denial }], isError: true as const };
+      }
+
       const searchParams = new URLSearchParams({
         apikey: apiKey,
         url: params.url,

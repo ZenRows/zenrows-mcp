@@ -19,6 +19,7 @@
     "inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/index.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
+    "test": "node --import tsx --test tests/*.test.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run clean && npm run build && npm run typecheck && npm run lint",
     "publish-beta": "npm publish --tag beta",
