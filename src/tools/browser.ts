@@ -29,10 +29,10 @@ export function registerBrowserTools(server: McpServer, apiKey: string, browserU
     "browser_navigate",
     {
       annotations: { title: "Open Browser & Navigate", readOnlyHint: false, destructiveHint: false },
-      description: `Open a ZenRows Scraping Browser session and navigate to a URL.
+      description: `Open a Zenrows Browser Sessions session and navigate to a URL.
 
 This is the entry point for all browser automation. It creates a new session backed by
-ZenRows' anti-bot infrastructure and navigates to the given URL in one step.
+Zenrows' anti-bot infrastructure and navigates to the given URL in one step.
 
 Returns a session_id that must be passed to every subsequent browser_* tool call.
 Always call browser_close when done to close the session and free resources.

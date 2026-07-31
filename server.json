@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ZenRows/zenrows-mcp",
-  "description": "ZenRows MCP server — Universal Scraper API for AI coding assistants",
+  "description": "Zenrows MCP server — Fetch and Browser Sessions for AI coding assistants",
   "author": {
-    "name": "ZenRows",
+    "name": "Zenrows",
     "url": "https://github.com/ZenRows"
   },
   "repository": {
@@ -21,7 +21,7 @@
       },
       "environmentVariables": [
         {
-          "description": "Your ZenRows API key from https://app.zenrows.com/account/settings",
+          "description": "Your Zenrows API key from https://app.zenrows.com/account/settings",
           "isRequired": true,
           "format": "string",
           "isSecret": true,

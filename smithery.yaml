@@ -18,8 +18,8 @@ startCommand:
     properties:
       apiKey:
         type: string
-        title: ZenRows API Key
-        description: Your ZenRows API key from app.zenrows.com/register
+        title: Zenrows API Key
+        description: Your Zenrows API key from app.zenrows.com/register
       js_render:
         type: boolean
         title: JavaScript Rendering

@@ -11,4 +11,4 @@ if (!apiKey) {
 const server = createServer(apiKey);
 const transport = new StdioServerTransport();
 await server.connect(transport);
-process.stderr.write("ZenRows MCP server running on stdio\n");
+process.stderr.write("Zenrows MCP server running on stdio\n");

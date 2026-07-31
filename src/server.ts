@@ -33,7 +33,7 @@ export function createServer(apiKey: string, clientName?: string): McpServer {
         readOnlyHint: true,
         destructiveHint: false,
       },
-      description: `Scrape any webpage and return its content using ZenRows.
+      description: `Scrape any webpage and return its content using Zenrows.
 
 Use this tool to fetch webpage content for analysis. By default it returns clean
 markdown, which is ideal for LLM processing.
@@ -88,7 +88,7 @@ Examples:
             "Output format. 'markdown' (default) preserves structure and is ideal for LLMs. " +
               "'plaintext' strips all formatting for pure text extraction. " +
               "'pdf' returns a PDF of the page. " +
-              "'html' returns the raw HTML source (omits the response_type param; ZenRows default). " +
+              "'html' returns the raw HTML source (omits the response_type param; Zenrows default). " +
               "Ignored when autoparse, css_extractor, outputs, or screenshot params are set."
           ),
 
@@ -200,7 +200,7 @@ Examples:
         searchParams.set("screenshot_selector", params.screenshot_selector);
 
       // response_type is mutually exclusive with autoparse, css_extractor, outputs, and screenshot params.
-      // 'html' is the ZenRows default (no param); all other values are passed through.
+      // 'html' is the Zenrows default (no param); all other values are passed through.
       const isScreenshot =
         params.screenshot || params.screenshot_fullpage || params.screenshot_selector;
       const effectiveType = params.response_type ?? DEFAULT_RESPONSE_TYPE;
@@ -228,7 +228,7 @@ Examples:
           content: [
             {
               type: "text" as const,
-              text: `Network error contacting ZenRows: ${err instanceof Error ? err.message : String(err)}`,
+              text: `Network error contacting Zenrows: ${err instanceof Error ? err.message : String(err)}`,
             },
           ],
           isError: true,
@@ -238,7 +238,7 @@ Examples:
       if (!response.ok) {
         const body = await response.text();
         return {
-          content: [{ type: "text" as const, text: `ZenRows error ${response.status}: ${body}` }],
+          content: [{ type: "text" as const, text: `Zenrows error ${response.status}: ${body}` }],
           isError: true,
         };
       }
@@ -284,7 +284,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the ZenRows MCP scrape tool and provide a concise summary of the main content. Include key points, headings, and any important data found on the page.`,
+            text: `Scrape ${url} using the Zenrows MCP scrape tool and provide a concise summary of the main content. Include key points, headings, and any important data found on the page.`,
           },
         },
       ],
@@ -311,7 +311,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the ZenRows MCP scrape tool with css_extractor set to ${fields}. Return the extracted data as a clean JSON object.`,
+            text: `Scrape ${url} using the Zenrows MCP scrape tool with css_extractor set to ${fields}. Return the extracted data as a clean JSON object.`,
           },
         },
       ],
@@ -334,7 +334,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the ZenRows MCP scrape tool with js_render set to true. The page requires JavaScript execution to load its content. Return the full rendered content in markdown format.`,
+            text: `Scrape ${url} using the Zenrows MCP scrape tool with js_render set to true. The page requires JavaScript execution to load its content. Return the full rendered content in markdown format.`,
           },
         },
       ],

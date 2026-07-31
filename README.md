@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/zenrows_light.svg">
-    <img src="assets/zenrows_dark.svg" alt="ZenRows MCP" width="380">
+    <img src="assets/zenrows_dark.svg" alt="Zenrows MCP" width="380">
   </picture>
 </p>
 
@@ -112,8 +112,8 @@ The exact location of this config varies by client. See the [per-client setup gu
 
 The Zenrows MCP exposes two families of tools:
 
-- **`scrape`**: single-request fetch returning Markdown, plain text, HTML, JSON, PDF, or screenshot. Backed by [Fetch](https://docs.zenrows.com/universal-scraper-api/api-reference) (formerly, Universal Scraper API).
-- **`browser_*`**: 30+ tools for full browser automation including navigation, clicks, form fills, JavaScript execution, cookies, tabs, and persistent sessions. Backed by [Browser Sessions](https://docs.zenrows.com/scraping-browser/introduction) (formerly, Scraping Browser).
+- **`scrape`**: single-request fetch returning Markdown, plain text, HTML, JSON, PDF, or screenshot. Backed by [Fetch](https://docs.zenrows.com/fetch/api-reference).
+- **`browser_*`**: 30+ tools for full browser automation including navigation, clicks, form fills, JavaScript execution, cookies, tabs, and persistent sessions. Backed by [Browser Sessions](https://docs.zenrows.com/browser-sessions/introduction).
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
 
@@ -140,8 +140,8 @@ Pull requests and issues are welcome.
 ## Resources
 
 - [Full Zenrows MCP documentation](https://docs.zenrows.com/mcp/overview)
-- [Zenrows Fetch (formerly, Universal Scraper API)](https://docs.zenrows.com/universal-scraper-api/api-reference)
-- [Zenrows Browser Sessions (formerly, Scraping Browser)](https://docs.zenrows.com/scraping-browser/introduction)
+- [Zenrows Fetch](https://docs.zenrows.com/fetch/api-reference)
+- [Zenrows Browser Sessions](https://docs.zenrows.com/browser-sessions/introduction)
 - [npm package](https://www.npmjs.com/package/@zenrows/mcp)
 - [Get your API key](https://app.zenrows.com/register)
 
