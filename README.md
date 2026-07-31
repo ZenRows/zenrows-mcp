@@ -5,21 +5,21 @@
   </picture>
 </p>
 
-# ZenRows MCP Server
+# Zenrows MCP Server
 
-The ZenRows MCP (Model Context Protocol) server is the standard way AI systems use ZenRows. A single connection gives your AI assistant, agent, or application real-time access to any website.
+The Zenrows MCP (Model Context Protocol) server is the standard way AI systems use Zenrows' web data infrastructure. A single connection gives your AI assistant, agent, or application reliable, real-time access to the live web, including the protected web.
 
 [![npm version](https://img.shields.io/npm/v/@zenrows/mcp)](https://www.npmjs.com/package/@zenrows/mcp)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ZenRows/zenrows-mcp/blob/main/LICENSE)
 
-📚 **Full documentation:** [docs.zenrows.com/integrations/mcp/mcp-overview](https://docs.zenrows.com/integrations/mcp/mcp-overview)
+📚 **Full documentation:** [docs.zenrows.com/mcp/overview](https://docs.zenrows.com/mcp/overview)
 
 ---
 
-## Why ZenRows MCP
+## Why Zenrows MCP
 
-- **Reach sites that normally block bots.** Get access to any website at scale without getting blocked by anti-bot systems.
-- **Managed scraping infrastructure.** Proxy rotation, headless browser orchestration, anti-bot evasion, and session management run on ZenRows infrastructure.
+- **Reach sites that normally block bots.** Get reliable access to protected sites at scale, without building anti-bot handling yourself.
+- **Managed web data infrastructure.** Proxy rotation, headless browser orchestration, anti-bot handling, and session management run on Zenrows' infrastructure.
 - **Plug into any AI you already use.** Works with any MCP client, including AI assistants, agent frameworks, AI SDKs, IDE plugins, and custom applications.
 - **Plain English, no scraping code.** Describe the task naturally and the AI picks the right tool. No selectors, no proxy management, no anti-bot tuning.
 
@@ -27,11 +27,11 @@ The ZenRows MCP (Model Context Protocol) server is the standard way AI systems u
 
 ## Quick start
 
-ZenRows MCP supports two transport options. Both expose the same set of tools and capabilities. Pick the one that fits your client.
+Zenrows MCP supports two transport options. Both expose the same set of tools and capabilities. Pick the one that fits your client.
 
 ### Remote MCP server
 
-Use the hosted ZenRows MCP server when your AI application calls an LLM API directly. The server runs on ZenRows infrastructure, so there is nothing to install, configure, or update.
+Use the hosted Zenrows MCP server when your AI application calls an LLM API directly. The server runs on Zenrows' infrastructure, so there is nothing to install, configure, or update.
 
 **Server URL:**
 
@@ -41,7 +41,7 @@ https://mcp.zenrows.com/mcp
 
 **Transport:** Streamable HTTP
 
-**Authentication:** OAuth-based. Pass your ZenRows API key as a Bearer token in the `Authorization` header on every request.
+**Authentication:** OAuth-based. Pass your Zenrows API key as a Bearer token in the `Authorization` header on every request.
 
 ```
 Authorization: Bearer YOUR_ZENROWS_API_KEY
@@ -76,7 +76,7 @@ response = client.responses.create(
 print(response.output_text)
 ```
 
-For the full walkthrough with framework-specific examples, see the [Remote MCP server docs](https://docs.zenrows.com/integrations/mcp/mcp-overview#remote-mcp-server).
+For the full walkthrough with framework-specific examples, see the [Remote MCP server docs](https://docs.zenrows.com/mcp/overview#remote-mcp-server).
 
 ### Local MCP server
 
@@ -104,20 +104,20 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 }
 ```
 
-The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/integrations/mcp/mcp-overview#per-client-setup-guides) for the file path for your client.
+The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
 
 ---
 
 ## Tools
 
-The ZenRows MCP exposes two families of tools:
+The Zenrows MCP exposes two families of tools:
 
-- **`scrape`**: single-request fetch returning Markdown, plain text, HTML, JSON, PDF, or screenshot. Backed by the [Universal Scraper API](https://docs.zenrows.com/universal-scraper-api/api-reference).
-- **`browser_*`**: 30+ tools for full browser automation including navigation, clicks, form fills, JavaScript execution, cookies, tabs, and persistent sessions. Backed by the [Scraping Browser](https://docs.zenrows.com/scraping-browser/introduction).
+- **`scrape`**: single-request fetch returning Markdown, plain text, HTML, JSON, PDF, or screenshot. Backed by [Fetch](https://docs.zenrows.com/universal-scraper-api/api-reference) (formerly, Universal Scraper API).
+- **`browser_*`**: 30+ tools for full browser automation including navigation, clicks, form fills, JavaScript execution, cookies, tabs, and persistent sessions. Backed by [Browser Sessions](https://docs.zenrows.com/scraping-browser/introduction) (formerly, Scraping Browser).
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
 
-See the [full tool reference](https://docs.zenrows.com/integrations/mcp/mcp-overview#tools) for every tool, parameter, and return value.
+See the [full tool reference](https://docs.zenrows.com/mcp/overview#tools) for every tool, parameter, and return value.
 
 ---
 
@@ -139,9 +139,9 @@ Pull requests and issues are welcome.
 
 ## Resources
 
-- [Full ZenRows MCP documentation](https://docs.zenrows.com/integrations/mcp/mcp-overview)
-- [ZenRows Universal Scraper API](https://docs.zenrows.com/universal-scraper-api/api-reference)
-- [ZenRows Scraping Browser](https://docs.zenrows.com/scraping-browser/introduction)
+- [Full Zenrows MCP documentation](https://docs.zenrows.com/mcp/overview)
+- [Zenrows Fetch (formerly, Universal Scraper API)](https://docs.zenrows.com/universal-scraper-api/api-reference)
+- [Zenrows Browser Sessions (formerly, Scraping Browser)](https://docs.zenrows.com/scraping-browser/introduction)
 - [npm package](https://www.npmjs.com/package/@zenrows/mcp)
 - [Get your API key](https://app.zenrows.com/register)
 
