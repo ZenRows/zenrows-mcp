@@ -65,7 +65,7 @@ app.get("/.well-known/oauth-authorization-server", (c) =>
 
 // RFC 7591 — Dynamic Client Registration
 // MCP clients (Claude.ai, Cursor, etc.) register themselves before initiating OAuth.
-// Since ZenRows API keys are the real auth mechanism, client registration is stateless —
+// Since Zenrows API keys are the real auth mechanism, client registration is stateless —
 // we echo back a stable client_id derived from the request (or the one the client provides).
 app.post("/register", async (c) => {
   const body = await c.req.json().catch(() => ({}));
@@ -172,6 +172,6 @@ export const handler = async (event: LambdaEvent) => {
 if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
   const port = Number(process.env.PORT) || 3000;
   serve({ fetch: app.fetch, port }, () => {
-    process.stderr.write(`ZenRows MCP HTTP server listening on http://localhost:${port}/mcp\n`);
+    process.stderr.write(`Zenrows MCP HTTP server listening on http://localhost:${port}/mcp\n`);
   });
 }
