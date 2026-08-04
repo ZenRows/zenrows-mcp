@@ -63,6 +63,64 @@ app.get("/.well-known/oauth-authorization-server", (c) =>
   })
 );
 
+// MCP Server Card (SEP-2127 canonical + SEP-1649 legacy paths).
+// Lets agents discover this remote MCP before connecting.
+function mcpServerCard() {
+  return {
+    $schema: "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+    name: "io.zenrows/mcp",
+    version: "2.0.6",
+    description:
+      "ZenRows MCP — scrape and extract from protected sites via the Universal Scraper API (anti-bot bypass, JS rendering, proxies).",
+    websiteUrl: "https://www.zenrows.com/mcp",
+    remotes: [
+      {
+        type: "streamable-http",
+        url: `${MCP_SERVER}/mcp`,
+        headers: {
+          Authorization: "Bearer ${ZENROWS_API_KEY}",
+        },
+      },
+    ],
+    // Older SEP-1649-shaped fields some scanners still expect.
+    protocolVersion: "2025-06-18",
+    serverInfo: {
+      name: "ZenRows",
+      version: "2.0.6",
+      description: "ZenRows Universal Scraper API via MCP",
+      homepage: "https://www.zenrows.com/mcp",
+    },
+    transport: {
+      type: "streamable-http",
+      url: `${MCP_SERVER}/mcp`,
+    },
+    capabilities: {
+      tools: true,
+      resources: false,
+      prompts: false,
+    },
+  };
+}
+
+app.get("/.well-known/mcp.json", (c) =>
+  c.json(mcpServerCard(), 200, {
+    "Cache-Control": "public, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+  })
+);
+app.get("/.well-known/mcp/server-card.json", (c) =>
+  c.json(mcpServerCard(), 200, {
+    "Cache-Control": "public, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+  })
+);
+app.get("/.well-known/mcp/server-cards.json", (c) =>
+  c.json(mcpServerCard(), 200, {
+    "Cache-Control": "public, max-age=300",
+    "X-Content-Type-Options": "nosniff",
+  })
+);
+
 // RFC 7591 — Dynamic Client Registration
 // MCP clients (Claude.ai, Cursor, etc.) register themselves before initiating OAuth.
 // Since Zenrows API keys are the real auth mechanism, client registration is stateless —
