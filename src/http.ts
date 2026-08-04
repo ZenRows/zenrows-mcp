@@ -1,8 +1,12 @@
+import { createRequire } from "module";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "./server.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
 
 // ─── app ──────────────────────────────────────────────────────────────────────
 
@@ -69,7 +73,7 @@ function mcpServerCard() {
   return {
     $schema: "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
     name: "io.zenrows/mcp",
-    version: "2.0.6",
+    version: pkg.version,
     description:
       "ZenRows MCP — scrape and extract from protected sites via the Universal Scraper API (anti-bot bypass, JS rendering, proxies).",
     websiteUrl: "https://www.zenrows.com/mcp",
@@ -86,7 +90,7 @@ function mcpServerCard() {
     protocolVersion: "2025-06-18",
     serverInfo: {
       name: "ZenRows",
-      version: "2.0.6",
+      version: pkg.version,
       description: "ZenRows Universal Scraper API via MCP",
       homepage: "https://www.zenrows.com/mcp",
     },
