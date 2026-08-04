@@ -17,6 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # Dockerfile COPY's dist/ + node_modules/ from the build context.
+      - run: npm ci
+      - run: npm run build
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -49,21 +58,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      id-token: write # OIDC for npm Trusted Publishing
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: "npm"
+          # Trusted Publishing needs npm >= 11.5.1 (ships with Node 24).
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          cache: "npm"
 
       - run: npm ci
 
       - run: npm run build
 
-      - run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # No NODE_AUTH_TOKEN — npm uses GitHub OIDC against the Trusted Publisher
+      # configured on https://www.npmjs.com/package/@zenrows/mcp (Settings).
+      # Provenance is automatic with trusted publishing.
+      - run: npm publish --access public
