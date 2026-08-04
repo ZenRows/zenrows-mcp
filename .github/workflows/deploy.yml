@@ -6,30 +6,16 @@ on:
       - "v*.*.*"
 
 jobs:
-  publish:
-    name: npm + GHCR
+  # Hosted MCP (Lambda) only needs GHCR. Don't block it on npm registry auth.
+  publish-ghcr:
+    name: GHCR + deploy
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      id-token: write
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: "npm"
-          registry-url: "https://registry.npmjs.org"
-
-      - run: npm ci
-
-      - run: npm run build
-
-      - run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -57,3 +43,27 @@ jobs:
           EOF
         env:
           GH_TOKEN: ${{ secrets.DEPLOY_TRIGGER_PAT }}
+
+  publish-npm:
+    name: npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
