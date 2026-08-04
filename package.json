@@ -4,7 +4,7 @@
   "description": "Zenrows MCP server — Fetch and Browser Sessions for AI coding assistants",
   "type": "module",
   "bin": {
-    "zenrows-mcp": "./dist/index.js"
+    "zenrows-mcp": "dist/index.js"
   },
   "files": [
     "dist"
@@ -55,6 +55,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ZenRows/zenrows-mcp"
+    "url": "git+https://github.com/ZenRows/zenrows-mcp.git"
   }
 }
