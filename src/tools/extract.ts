@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { appendClaimHint } from "../auth/claim-hint.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
@@ -10,7 +11,10 @@ const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 type TextContent = { type: "text"; text: string };
 
 function err(text: string): { content: TextContent[]; isError: true } {
-  return { content: [{ type: "text" as const, text }], isError: true as const };
+  return {
+    content: [{ type: "text" as const, text: appendClaimHint(text, { body: text, message: text }) }],
+    isError: true as const,
+  };
 }
 
 function json(data: unknown): { content: TextContent[] } {

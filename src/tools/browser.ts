@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { appendClaimHint } from "../auth/claim-hint.js";
 import { browserFetch, browserError } from "./browser-fetch.js";
 
 type TextContent = { type: "text"; text: string };
@@ -10,7 +11,10 @@ function ok(): { content: TextContent[] } {
 }
 
 function err(msg: string): { content: TextContent[]; isError: true } {
-  return { content: [{ type: "text" as const, text: msg }], isError: true as const };
+  return {
+    content: [{ type: "text" as const, text: appendClaimHint(msg, { body: msg, message: msg }) }],
+    isError: true as const,
+  };
 }
 
 function json(data: unknown): { content: TextContent[] } {

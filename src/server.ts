@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { appendClaimHint } from "./auth/claim-hint.js";
 import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
@@ -238,8 +239,12 @@ Examples:
 
       if (!response.ok) {
         const body = await response.text();
+        const text = appendClaimHint(`Zenrows error ${response.status}: ${body}`, {
+          status: response.status,
+          body,
+        });
         return {
-          content: [{ type: "text" as const, text: `Zenrows error ${response.status}: ${body}` }],
+          content: [{ type: "text" as const, text }],
           isError: true,
         };
       }

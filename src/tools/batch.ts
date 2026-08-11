@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { appendClaimHint } from "../auth/claim-hint.js";
 import {
   BatchError,
   createJob,
@@ -15,9 +16,23 @@ const pkg = require("../../package.json") as { version: string };
 
 type TextContent = { type: "text"; text: string };
 
-function err(data: unknown): { content: TextContent[]; isError: true } {
+function err(data: unknown, hint?: { status?: number; code?: string; message?: string }): {
+  content: TextContent[];
+  isError: true;
+} {
+  const raw = typeof data === "string" ? data : JSON.stringify(data);
   return {
-    content: [{ type: "text" as const, text: typeof data === "string" ? data : JSON.stringify(data) }],
+    content: [
+      {
+        type: "text" as const,
+        text: appendClaimHint(raw, {
+          status: hint?.status,
+          code: hint?.code,
+          message: hint?.message ?? raw,
+          body: raw,
+        }),
+      },
+    ],
     isError: true as const,
   };
 }
@@ -27,7 +42,9 @@ function json(data: unknown): { content: TextContent[] } {
 }
 
 function batchErr(e: unknown): { content: TextContent[]; isError: true } {
-  if (e instanceof BatchError) return err(e.toJSON());
+  if (e instanceof BatchError) {
+    return err(e.toJSON(), { status: e.status, code: e.code, message: e.message });
+  }
   return err({
     code: "BATCH_FAILED",
     message: e instanceof Error ? e.message : String(e),
