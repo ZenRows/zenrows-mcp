@@ -1,7 +1,10 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
+import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
+import { registerExtractTool } from "./tools/extract.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -33,24 +36,22 @@ export function createServer(apiKey: string, clientName?: string): McpServer {
         readOnlyHint: true,
         destructiveHint: false,
       },
-      description: `Scrape any webpage and return its content using Zenrows.
+      description: `Scrape any webpage and return its content using Zenrows (Fetch).
 
-Use this tool to fetch webpage content for analysis. By default it returns clean
-markdown, which is ideal for LLM processing.
+Use for full-page content (markdown/HTML/PDF/screenshot). For structured JSON
+fields (products, articles, listings), prefer the extract tool when it fits —
+it returns parsed fields instead of a full page body.
 
 When to enable options:
 - js_render: page uses React/Vue/Angular, loads content dynamically, or content
   appears missing on the first attempt
 - premium_proxy: site returns 403/blocked errors even with js_render enabled
 - wait_for: specific content loads after initial render (requires js_render)
-- css_extractor: you only need specific elements, not the whole page
-- autoparse: structured data pages like products or articles
 
 Examples:
   Basic:    { url: "https://example.com" }
   Dynamic:  { url: "https://spa.com", js_render: true }
-  Protected:{ url: "https://protected.com", js_render: true, premium_proxy: true }
-  Extract:  { url: "https://shop.com", css_extractor: '{"title":"h1","price":".price"}' }`,
+  Protected:{ url: "https://protected.com", js_render: true, premium_proxy: true }`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to scrape"),
 
@@ -295,7 +296,7 @@ Examples:
     "extract_structured_data",
     {
       title: "Extract Structured Data",
-      description: "Scrape a webpage and extract specific structured data using CSS selectors.",
+      description: "Extract specific structured data from a webpage using CSS selectors.",
       argsSchema: {
         url: z.string().url().describe("The webpage URL to extract data from"),
         fields: z
@@ -311,7 +312,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the Zenrows MCP scrape tool with css_extractor set to ${fields}. Return the extracted data as a clean JSON object.`,
+            text: `Use the Zenrows MCP extract tool on ${url} with mode=css and css_extractor set to ${fields}. Return the extracted data as a clean JSON object.`,
           },
         },
       ],
@@ -341,8 +342,48 @@ Examples:
     })
   );
 
+  registerExtractTool(server, apiKey, getClientName);
+  registerBatchTools(server, apiKey);
+
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
   registerBrowserTools(server, apiKey, BROWSER_URL, getClientName);
+
+  // Always expose account resource; handler re-reads disk so ZENROWS_HOME is visible.
+  server.registerResource(
+    "zenrows-account",
+    "zenrows://account",
+    {
+      description:
+        "Local Zenrows agent account metadata (claim URL for unclaimed Free plans). Re-reads ~/.zenrows or $ZENROWS_HOME on each read.",
+      mimeType: "application/json",
+    },
+    async () => {
+      const acct = readAccount();
+      const home = getZenrowsDir();
+      const body = acct
+        ? {
+            accountId: acct.accountId,
+            unclaimed: acct.unclaimed,
+            claimUrl: acct.claimUrl,
+            createdAt: acct.createdAt,
+            zenrowsHome: home,
+          }
+        : {
+            unclaimed: false,
+            message: "No local agent account file (key from env or missing).",
+            zenrowsHome: home,
+          };
+      return {
+        contents: [
+          {
+            uri: "zenrows://account",
+            mimeType: "application/json",
+            text: JSON.stringify(body, null, 2),
+          },
+        ],
+      };
+    }
+  );
 
   return server;
 }
