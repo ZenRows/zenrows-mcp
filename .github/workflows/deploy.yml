@@ -24,6 +24,7 @@ jobs:
 
       # Dockerfile COPY's dist/ + node_modules/ from the build context.
       - run: npm ci
+      - run: npm test
       - run: npm run build
 
       - name: Log in to GHCR
@@ -80,7 +81,7 @@ jobs:
           cache: "npm"
 
       - run: npm ci
-
+      - run: npm test
       - run: npm run build
 
       # No NODE_AUTH_TOKEN — npm uses GitHub OIDC against the Trusted Publisher
