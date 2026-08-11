@@ -1,7 +1,7 @@
 {
   "name": "@zenrows/mcp",
   "version": "2.1.2",
-  "description": "Zenrows MCP server — Fetch and Browser Sessions for AI coding assistants",
+  "description": "Zenrows MCP server — Fetch, Extract, Batch, and Browser Sessions for AI coding assistants",
   "type": "module",
   "bin": {
     "zenrows-mcp": "dist/index.js"
@@ -20,8 +20,9 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run clean && npm run build && npm run typecheck && npm run lint",
+    "prepublishOnly": "npm run clean && npm run build && npm run typecheck && npm run lint && npm test",
     "publish-beta": "npm publish --tag beta",
+    "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
