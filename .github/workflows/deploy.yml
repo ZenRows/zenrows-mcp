@@ -4,11 +4,23 @@ on:
   push:
     tags:
       - "v*.*.*"
+  # Catch-up / metadata-only republish without cutting a new npm version.
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: "Also publish to npm (default: registry only)"
+        type: boolean
+        default: false
+      publish_ghcr:
+        description: "Also build/push GHCR + deploy (default: registry only)"
+        type: boolean
+        default: false
 
 jobs:
   # Hosted MCP (Lambda) only needs GHCR. Don't block it on npm registry auth.
   publish-ghcr:
     name: GHCR + deploy
+    if: github.event_name == 'push' || inputs.publish_ghcr
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,14 +46,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve image tag
+        id: meta
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build and push to GHCR
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           docker build --platform linux/arm64 \
-            -t ghcr.io/${OWNER}/zenrows-mcp:${{ github.ref_name }} \
+            -t ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }} \
             -t ghcr.io/${OWNER}/zenrows-mcp:latest \
             .
-          docker push ghcr.io/${OWNER}/zenrows-mcp:${{ github.ref_name }}
+          docker push ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }}
           docker push ghcr.io/${OWNER}/zenrows-mcp:latest
 
       - name: Create deploy token
@@ -58,13 +79,14 @@ jobs:
           gh api repos/ZenRows/zenrows-mcp-deploy/dispatches \
             --method POST \
             --input - <<EOF
-          {"event_type":"deploy","client_payload":{"tag":"${{ github.ref_name }}"}}
+          {"event_type":"deploy","client_payload":{"tag":"${{ steps.meta.outputs.tag }}"}}
           EOF
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
   publish-npm:
     name: npm
+    if: github.event_name == 'push' || inputs.publish_npm
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -81,6 +103,7 @@ jobs:
           cache: "npm"
 
       - run: npm ci
+      - run: npm run check:server-json
       - run: npm test
       - run: npm run build
 
@@ -88,3 +111,51 @@ jobs:
       # configured on https://www.npmjs.com/package/@zenrows/mcp (Settings).
       # Provenance is automatic with trusted publishing.
       - run: npm publish --access public
+
+  # Official MCP Registry (registry.modelcontextprotocol.io). Independent of npm
+  # publish so metadata can be fixed without cutting a new package version.
+  publish-mcp-registry:
+    name: MCP Registry
+    # After npm on tag pushes (package must exist for ownership checks). On
+    # workflow_dispatch, npm is optional — assumed already published.
+    needs: [publish-npm]
+    if: |
+      always() && !cancelled() && (
+        (github.event_name == 'push' && needs.publish-npm.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && (inputs.publish_npm == false || needs.publish-npm.result == 'success'))
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for mcp-publisher login github-oidc
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Sync server.json version from package.json / tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            export VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          npm run sync:server-json
+          npm run check:server-json
+          cat server.json
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" \
+            | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json
+        run: ./mcp-publisher publish

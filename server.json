@@ -1,31 +1,41 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.ZenRows/zenrows-mcp",
-  "description": "Zenrows MCP server — Fetch and Browser Sessions for AI coding assistants",
-  "author": {
-    "name": "Zenrows",
-    "url": "https://github.com/ZenRows"
-  },
+  "description": "Zenrows MCP server — Fetch, Extract, Batch, and Browser Sessions for AI coding assistants",
   "repository": {
     "url": "https://github.com/ZenRows/zenrows-mcp",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "2.2.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@zenrows/mcp",
-      "version": "1.0.0",
+      "version": "2.2.0",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
-          "description": "Your Zenrows API key from https://app.zenrows.com/account/settings",
-          "isRequired": true,
+          "description": "Optional ZenRows API key (https://app.zenrows.com/account/settings). If unset, stdio auto-provisions a Free account unless ZENROWS_AUTO_SIGNUP=false.",
+          "isRequired": false,
           "format": "string",
           "isSecret": true,
           "name": "ZENROWS_API_KEY"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.zenrows.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer <ZENROWS_API_KEY>, or use OAuth in clients that support it. Remote MCP does not auto-create accounts.",
+          "isRequired": false,
+          "isSecret": true
         }
       ]
     }
