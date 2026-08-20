@@ -75,7 +75,7 @@ function mcpServerCard() {
     name: "io.zenrows/mcp",
     version: pkg.version,
     description:
-      "ZenRows MCP — scrape and extract from protected sites via the Universal Scraper API (anti-bot bypass, JS rendering, proxies).",
+      "Zenrows MCP — scrape and extract from protected sites via Fetch (anti-bot bypass, JS rendering, proxies).",
     websiteUrl: "https://www.zenrows.com/mcp",
     remotes: [
       {
@@ -89,9 +89,9 @@ function mcpServerCard() {
     // Older SEP-1649-shaped fields some scanners still expect.
     protocolVersion: "2025-06-18",
     serverInfo: {
-      name: "ZenRows",
+      name: "Zenrows",
       version: pkg.version,
-      description: "ZenRows Universal Scraper API via MCP",
+      description: "Zenrows Fetch API via MCP",
       homepage: "https://www.zenrows.com/mcp",
     },
     transport: {

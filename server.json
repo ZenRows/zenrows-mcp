@@ -17,7 +17,7 @@
       },
       "environmentVariables": [
         {
-          "description": "Optional ZenRows API key (https://app.zenrows.com/account/settings). If unset, stdio auto-provisions a Free account unless ZENROWS_AUTO_SIGNUP=false.",
+          "description": "Optional Zenrows API key (https://app.zenrows.com/account/settings). If unset, stdio auto-provisions a Free account unless ZENROWS_AUTO_SIGNUP=false.",
           "isRequired": false,
           "format": "string",
           "isSecret": true,
