@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "./auth/claim-hint.js";
 import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
+import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
 import { registerExtractTool } from "./tools/extract.js";
@@ -15,7 +16,8 @@ const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 const DEFAULT_JS_RENDER = process.env.ZENROWS_JS_RENDER === "true";
 const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
-  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
+  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ??
+  "markdown";
 
 export function createServer(apiKey: string, clientName?: string): McpServer {
   const server = new McpServer({
@@ -349,6 +351,7 @@ Examples:
 
   registerExtractTool(server, apiKey, getClientName);
   registerBatchTools(server, apiKey);
+  registerAccountTools(server, apiKey);
 
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
   registerBrowserTools(server, apiKey, BROWSER_URL, getClientName);

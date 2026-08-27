@@ -5,8 +5,17 @@ import { readAccount } from "./ensure-key.js";
 
 const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
 
-/** AUTH004 is concurrency, not trial credits — don't nudge claim for it. */
-const SKIP_CODES = new Set(["AUTH004"]);
+/**
+ * Codes that are not an allowance problem, so a claim nudge would be noise.
+ *
+ * AUTH006 is the concurrency limit. AUTH004 used to be listed here on the belief that it
+ * was concurrency too — it is not. AUTH004 is "Usage Exceeded": the allowance itself is
+ * spent (docs `api-error-codes#AUTH004`; gateway logs carry `err: "usage exceeded"`,
+ * `msg: "user allowance failure"`). Skipping it suppressed the nudge at the one moment it
+ * is worth the most — an unclaimed Free agent that has just run through its allowance and
+ * would otherwise lose the account along with its usage history.
+ */
+const SKIP_CODES = new Set(["AUTH006"]);
 
 function extractCode(body?: string, code?: string): string | undefined {
   if (code && typeof code === "string") return code;
@@ -22,12 +31,14 @@ function extractCode(body?: string, code?: string): string | undefined {
   }
 }
 
-export function isQuotaOrPlanError(opts: {
-  status?: number;
-  body?: string;
-  code?: string;
-  message?: string;
-} = {}): boolean {
+export function isQuotaOrPlanError(
+  opts: {
+    status?: number;
+    body?: string;
+    code?: string;
+    message?: string;
+  } = {}
+): boolean {
   const code = extractCode(opts.body, opts.code);
   if (code && SKIP_CODES.has(code)) return false;
 
