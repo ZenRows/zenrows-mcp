@@ -42,7 +42,51 @@ function json(data: unknown): { content: TextContent[] } {
   return { content: [{ type: "text", text: JSON.stringify(data) }] };
 }
 
-export function registerAccountTools(server: McpServer, apiKey: string): void {
+export type AccountOpts = { fetchImpl?: typeof fetch };
+
+/**
+ * Read the plan's usage. Split out from the handler so it can be exercised without an
+ * MCP server or a live account — the endpoint is the one thing here we cannot try
+ * against production from a test.
+ */
+export async function runAccountUsage(apiKey: string, opts: AccountOpts = {}) {
+  const doFetch = opts.fetchImpl ?? fetch;
+  let res: Response;
+  try {
+    res = await doFetch(SUBSCRIPTION_DETAILS_URL, {
+      headers: {
+        "X-API-Key": apiKey,
+        "User-Agent": `zenrows-mcp/${pkg.version}`,
+      },
+    });
+  } catch (e) {
+    return err(`Could not reach the Zenrows subscription endpoint: ${(e as Error).message}`);
+  }
+
+  const body = await res.text();
+
+  if (!res.ok) {
+    return err(`Zenrows returned ${res.status} for the subscription details endpoint.\n${body}`, {
+      status: res.status,
+      body,
+    });
+  }
+
+  // Passed through verbatim. The response shape is not part of any documented contract,
+  // so reshaping it here would mean inventing field names that could drift away from
+  // what the API actually sends.
+  try {
+    return json(JSON.parse(body));
+  } catch {
+    return json({ raw: body });
+  }
+}
+
+export function registerAccountTools(
+  server: McpServer,
+  apiKey: string,
+  opts: AccountOpts = {}
+): void {
   server.registerTool(
     "account_usage",
     {
@@ -66,36 +110,6 @@ billing period — it is not a permanent block and not a request to buy anything
 AUTH006 is the concurrency limit, which is a different thing entirely.`,
       inputSchema: {},
     },
-    async () => {
-      let res: Response;
-      try {
-        res = await fetch(SUBSCRIPTION_DETAILS_URL, {
-          headers: {
-            "X-API-Key": apiKey,
-            "User-Agent": `zenrows-mcp/${pkg.version}`,
-          },
-        });
-      } catch (e) {
-        return err(`Could not reach the Zenrows subscription endpoint: ${(e as Error).message}`);
-      }
-
-      const body = await res.text();
-
-      if (!res.ok) {
-        return err(
-          `Zenrows returned ${res.status} for the subscription details endpoint.\n${body}`,
-          { status: res.status, body }
-        );
-      }
-
-      // Passed through verbatim. The response shape is not part of any documented
-      // contract, so reshaping it here would mean inventing field names that could drift
-      // away from what the API actually sends.
-      try {
-        return json(JSON.parse(body));
-      } catch {
-        return json({ raw: body });
-      }
-    }
+    async () => runAccountUsage(apiKey, opts)
   );
 }
