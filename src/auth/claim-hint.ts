@@ -8,7 +8,11 @@ const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
 /**
  * Codes that are not an allowance problem, so a claim nudge would be noise.
  *
- * AUTH006 is the concurrency limit. AUTH004 used to be listed here on the belief that it
+ * AUTH006 is the concurrency limit, and is belt-and-braces: it comes back as 429, so it
+ * would not reach the 402 branch below in the first place. It is listed to keep the
+ * intent legible rather than because anything depends on it.
+ *
+ * AUTH004 used to be listed here on the belief that it
  * was concurrency too — it is not. AUTH004 is "Usage Exceeded": the allowance itself is
  * spent (docs `api-error-codes#AUTH004`; gateway logs carry `err: "usage exceeded"`,
  * `msg: "user allowance failure"`). Skipping it suppressed the nudge at the one moment it
