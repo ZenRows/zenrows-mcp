@@ -106,7 +106,11 @@ Credit costs per request: 1 basic, 5 js_render, 10 premium_proxy, 25 both. On a 
 plan a few hundred protected requests can exhaust a month, so check before fanning out.
 
 AUTH004 ("usage exceeded") means this allowance is spent. It renews at the end of the
-billing period — it is not a permanent block and not a request to buy anything.
+billing period, so it is not a permanent block: never retry-loop against it. If the
+human does not want to wait for the renewal, relay the way to continue now: add a
+credit pack at https://app.zenrows.com/billing?topup=open (opens the purchase
+directly) or upgrade at https://app.zenrows.com/plans. Prices are per plan; quote them
+only from this tool's response, never from memory.
 AUTH006 is the concurrency limit, which is a different thing entirely.`,
       inputSchema: {},
     },
