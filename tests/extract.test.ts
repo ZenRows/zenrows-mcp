@@ -4,12 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import {
-  buildExtractParams,
-  registerExtractTool,
-  runExtract,
-  zrErrorCode,
-} from "../src/tools/extract.ts";
+import { buildExtractParams, registerExtractTool, runExtract, zrErrorCode } from "../src/tools/extract.ts";
 
 /** Minimal stand-in for McpServer#registerTool — captures the handler so we can call it directly. */
 function fakeServer() {
@@ -60,7 +55,10 @@ test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => 
     const url = String(input);
     calls.push(url);
     if (url.includes("extract=auto")) {
-      return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
+      return new Response(AUTH010, {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      });
     }
     return new Response(JSON.stringify({ title: "fallback" }), {
       status: 200,
@@ -68,11 +66,7 @@ test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => 
     });
   }) as typeof fetch;
 
-  const outcome = await runExtract(
-    "testkey",
-    { url: "https://example.com" },
-    { fetchImpl }
-  );
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
 
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
@@ -92,11 +86,7 @@ test("runExtract does not fall back when fallback_autoparse is false", async () 
     return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
 
-  const outcome = await runExtract(
-    "testkey",
-    { url: "https://example.com", fallback_autoparse: false },
-    { fetchImpl }
-  );
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: false }, { fetchImpl });
 
   assert.equal(outcome.ok, false);
   if (outcome.ok) return;
@@ -124,9 +114,15 @@ test("runExtract surfaces autoparse failure after AUTH010 fallback", async () =>
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes("extract=auto")) {
-      return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
+      return new Response(AUTH010, {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      });
     }
-    return new Response("upstream boom", { status: 500, headers: { "content-type": "text/plain" } });
+    return new Response("upstream boom", {
+      status: 500,
+      headers: { "content-type": "text/plain" },
+    });
   }) as typeof fetch;
 
   const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
@@ -223,7 +219,10 @@ test("runExtract surfaces a network error as the raw message, not double-JSON-wr
 
 test("runExtract treats a 200 response with a non-JSON body as empty, not a crash", async () => {
   const fetchImpl = (async () =>
-    new Response("not json at all", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch;
+    new Response("not json at all", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    })) as typeof fetch;
 
   const outcome = await runExtract("k", { url: "https://example.com" }, { fetchImpl });
   assert.equal(outcome.ok, true);
@@ -243,11 +242,7 @@ test("runExtract passes the caller's MCP client name through as a request header
     });
   }) as typeof fetch;
 
-  await runExtract(
-    "k",
-    { url: "https://example.com" },
-    { fetchImpl, getClientName: () => "cursor" }
-  );
+  await runExtract("k", { url: "https://example.com" }, { fetchImpl, getClientName: () => "cursor" });
   assert.equal(sentHeader, "cursor");
 });
 
@@ -289,7 +284,10 @@ test("runExtract treats an empty object/array/string result as empty", async () 
 
   for (const [body, expectEmpty] of cases) {
     const fetchImpl = (async () =>
-      new Response(body, { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+      new Response(body, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
     const outcome = await runExtract("k", { url: "https://example.com" }, { fetchImpl });
     assert.equal(outcome.ok, true);
     if (!outcome.ok) continue;

@@ -45,11 +45,14 @@ test("resolveApiKey prefers env over secrets file", async () => {
 
 test("ensureApiKey throws when auto-signup disabled and no key", async () => {
   process.env[AUTO_SIGNUP_ENV] = "false";
-  await assert.rejects(() => ensureApiKey(), (e: unknown) => {
-    assert.ok(e instanceof AuthError);
-    assert.equal(e.code, "AUTH_MISSING");
-    return true;
-  });
+  await assert.rejects(
+    () => ensureApiKey(),
+    (e: unknown) => {
+      assert.ok(e instanceof AuthError);
+      assert.equal(e.code, "AUTH_MISSING");
+      return true;
+    }
+  );
 });
 
 test("ensureApiKey provisions via signup and persists secrets + account", async () => {
@@ -87,11 +90,13 @@ test("ensureApiKey provisions via signup and persists secrets + account", async 
 
 test("signupAgent maps 429 to SIGNUP_RATE_LIMITED", async () => {
   process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
-  const fetchImpl = (async () =>
-    new Response("slow down", { status: 429 })) as typeof fetch;
-  await assert.rejects(() => signupAgent({ fetchImpl }), (e: unknown) => {
-    assert.ok(e instanceof AuthError);
-    assert.equal(e.code, "SIGNUP_RATE_LIMITED");
-    return true;
-  });
+  const fetchImpl = (async () => new Response("slow down", { status: 429 })) as typeof fetch;
+  await assert.rejects(
+    () => signupAgent({ fetchImpl }),
+    (e: unknown) => {
+      assert.ok(e instanceof AuthError);
+      assert.equal(e.code, "SIGNUP_RATE_LIMITED");
+      return true;
+    }
+  );
 });

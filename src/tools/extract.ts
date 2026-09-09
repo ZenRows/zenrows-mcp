@@ -154,12 +154,7 @@ export async function runExtract(
   };
 
   let usedMode: ExtractMode = mode;
-  let result = await callZenrows(
-    apiKey,
-    buildExtractParams(apiKey, params.url, mode, opts),
-    getClientName,
-    fetchImpl
-  );
+  let result = await callZenrows(apiKey, buildExtractParams(apiKey, params.url, mode, opts), getClientName, fetchImpl);
 
   let fellBackToAutoparse = false;
   if (
@@ -228,11 +223,7 @@ export async function runExtract(
   };
 }
 
-export function registerExtractTool(
-  server: McpServer,
-  apiKey: string,
-  getClientName: () => string | undefined
-): void {
+export function registerExtractTool(server: McpServer, apiKey: string, getClientName: () => string | undefined): void {
   server.registerTool(
     "extract",
     {
@@ -259,19 +250,12 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .enum(["auto", "autoparse", "css"])
           .optional()
           .default("auto")
-          .describe(
-            "Extraction mode: auto (extract=auto, default), autoparse, or css (requires css_extractor)"
-          ),
+          .describe("Extraction mode: auto (extract=auto, default), autoparse, or css (requires css_extractor)"),
         css_extractor: z
           .string()
           .optional()
-          .describe(
-            'Required when mode=css. JSON map of field→selector, e.g. \'{"title":"h1","price":".price"}\''
-          ),
-        js_render: z
-          .boolean()
-          .optional()
-          .describe("Enable headless JS rendering (SPAs / dynamic content)"),
+          .describe('Required when mode=css. JSON map of field→selector, e.g. \'{"title":"h1","price":".price"}\''),
+        js_render: z.boolean().optional().describe("Enable headless JS rendering (SPAs / dynamic content)"),
         premium_proxy: z
           .boolean()
           .optional()
@@ -280,14 +264,8 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .string()
           .optional()
           .describe("ISO 3166-1 alpha-2 country code. Requires premium_proxy or mode_auto."),
-        mode_auto: z
-          .boolean()
-          .optional()
-          .describe("Enable Adaptive Stealth Mode (mode=auto) for tougher sites"),
-        wait_for: z
-          .string()
-          .optional()
-          .describe("CSS selector to wait for before extracting. Requires js_render."),
+        mode_auto: z.boolean().optional().describe("Enable Adaptive Stealth Mode (mode=auto) for tougher sites"),
+        wait_for: z.string().optional().describe("CSS selector to wait for before extracting. Requires js_render."),
         wait: z
           .number()
           .int()

@@ -13,7 +13,7 @@ export async function browserFetch(
   browserUrl: string,
   body?: unknown,
   clientName?: string,
-  toolName?: string,
+  toolName?: string
 ): Promise<BrowserFetchResult> {
   const url = `${browserUrl.replace(/\/$/, "")}${path}`;
   const headers: Record<string, string> = {

@@ -6,9 +6,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const script = fileURLToPath(
-  new URL("../scripts/sync-server-json-version.mjs", import.meta.url),
-);
+const script = fileURLToPath(new URL("../scripts/sync-server-json-version.mjs", import.meta.url));
 
 function fixture(version) {
   const dir = mkdtempSync(join(tmpdir(), "server-json-sync-"));
@@ -18,7 +16,7 @@ function fixture(version) {
       name: "@zenrows/mcp",
       version,
       description: `desc-${version}`,
-    }),
+    })
   );
   mkdirSync(join(dir, "scripts"), { recursive: true });
   writeFileSync(join(dir, "scripts", "sync-server-json-version.mjs"), readFileSync(script));
@@ -36,7 +34,7 @@ function fixture(version) {
           transport: { type: "stdio" },
         },
       ],
-    }),
+    })
   );
   return dir;
 }
@@ -62,11 +60,10 @@ describe("sync-server-json-version", () => {
   it("--check fails on drift", () => {
     const dir = fixture("1.2.3");
     try {
-      const r = spawnSync(
-        process.execPath,
-        ["scripts/sync-server-json-version.mjs", "--check"],
-        { cwd: dir, encoding: "utf8" },
-      );
+      const r = spawnSync(process.execPath, ["scripts/sync-server-json-version.mjs", "--check"], {
+        cwd: dir,
+        encoding: "utf8",
+      });
       assert.notEqual(r.status, 0);
       assert.match(r.stderr, /out of sync/);
     } finally {

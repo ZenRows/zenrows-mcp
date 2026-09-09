@@ -88,8 +88,7 @@ test("passes the response through unchanged rather than reshaping it", async () 
 
 test("a non-JSON body is returned as raw text, not swallowed", async () => {
   const res = await runAccountUsage("k", {
-    fetchImpl: (async () =>
-      new Response("<html>maintenance</html>", { status: 200 })) as unknown as typeof fetch,
+    fetchImpl: (async () => new Response("<html>maintenance</html>", { status: 200 })) as unknown as typeof fetch,
   });
 
   assert.deepEqual(JSON.parse(textOf(res)), { raw: "<html>maintenance</html>" });
@@ -97,8 +96,7 @@ test("a non-JSON body is returned as raw text, not swallowed", async () => {
 
 test("surfaces a failed status as an error, with the body kept for diagnosis", async () => {
   const res = await runAccountUsage("k", {
-    fetchImpl: (async () =>
-      new Response('{"code":"AUTH003"}', { status: 401 })) as unknown as typeof fetch,
+    fetchImpl: (async () => new Response('{"code":"AUTH003"}', { status: 401 })) as unknown as typeof fetch,
   });
 
   assert.equal(isError(res), true);

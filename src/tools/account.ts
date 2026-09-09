@@ -82,11 +82,7 @@ export async function runAccountUsage(apiKey: string, opts: AccountOpts = {}) {
   }
 }
 
-export function registerAccountTools(
-  server: McpServer,
-  apiKey: string,
-  opts: AccountOpts = {}
-): void {
+export function registerAccountTools(server: McpServer, apiKey: string, opts: AccountOpts = {}): void {
   server.registerTool(
     "account_usage",
     {

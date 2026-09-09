@@ -1,7 +1,4 @@
 {
   "$schema": "https://glama.ai/mcp/schemas/server.json",
-  "maintainers": [
-    "AnderRV",
-    "ZenRows"
-  ]
+  "maintainers": ["AnderRV", "ZenRows"]
 }

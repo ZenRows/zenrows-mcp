@@ -236,10 +236,7 @@ export async function listResults(
   return all;
 }
 
-export async function waitForJob(
-  id: string,
-  opts: CallOpts & { pollTimeoutMs?: number }
-): Promise<Job> {
+export async function waitForJob(id: string, opts: CallOpts & { pollTimeoutMs?: number }): Promise<Job> {
   const deadline = Date.now() + (opts.pollTimeoutMs ?? opts.timeoutMs ?? 600_000);
   let delay = 2000;
   for (;;) {
@@ -249,7 +246,9 @@ export async function waitForJob(
       throw new BatchError({
         code: "BATCH_FAILED",
         message: `Timed out waiting for batch job ${id} to finish.`,
-        detail: `The run did not reach a terminal state within ${Math.round((opts.pollTimeoutMs ?? opts.timeoutMs ?? 600_000) / 1000)}s.`,
+        detail: `The run did not reach a terminal state within ${Math.round(
+          (opts.pollTimeoutMs ?? opts.timeoutMs ?? 600_000) / 1000
+        )}s.`,
       });
     }
     await new Promise<void>((r) => setTimeout(r, delay));

@@ -1,14 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  BatchError,
-  batchBase,
-  createJob,
-  getJob,
-  listResults,
-  stopJob,
-  waitForJob,
-} from "../src/batch-api.ts";
+import { BatchError, batchBase, createJob, getJob, listResults, stopJob, waitForJob } from "../src/batch-api.ts";
 
 test("createJob maps 403 problem+json to BATCH_ACCESS_DENIED", async () => {
   const fetchImpl = (async () =>
@@ -34,7 +26,10 @@ test("getJob returns parsed job on 200", async () => {
     return new Response(
       JSON.stringify({
         job_id: "job-1",
-        latest_run: { status: "completed", stats: { total: 1, completed: 1, successful: 1, failed: 0 } },
+        latest_run: {
+          status: "completed",
+          stats: { total: 1, completed: 1, successful: 1, failed: 0 },
+        },
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
@@ -46,8 +41,7 @@ test("getJob returns parsed job on 200", async () => {
 });
 
 test("createJob maps 401 to AUTH_INVALID", async () => {
-  const fetchImpl = (async () =>
-    new Response(JSON.stringify({ detail: "bad key" }), { status: 401 })) as typeof fetch;
+  const fetchImpl = (async () => new Response(JSON.stringify({ detail: "bad key" }), { status: 401 })) as typeof fetch;
   await assert.rejects(
     () => createJob({ tasks: [{ url: "https://example.com" }] }, { apiKey: "bad", fetchImpl }),
     (e: unknown) => e instanceof BatchError && e.code === "AUTH_INVALID"
@@ -55,8 +49,7 @@ test("createJob maps 401 to AUTH_INVALID", async () => {
 });
 
 test("createJob maps 404 to BATCH_NOT_FOUND", async () => {
-  const fetchImpl = (async () =>
-    new Response(JSON.stringify({ title: "not found" }), { status: 404 })) as typeof fetch;
+  const fetchImpl = (async () => new Response(JSON.stringify({ title: "not found" }), { status: 404 })) as typeof fetch;
   await assert.rejects(
     () => getJob("missing", { apiKey: "k", fetchImpl }),
     (e: unknown) => e instanceof BatchError && e.code === "BATCH_NOT_FOUND"
@@ -64,8 +57,7 @@ test("createJob maps 404 to BATCH_NOT_FOUND", async () => {
 });
 
 test("createJob maps 429 to BATCH_QUOTA_EXCEEDED with a concurrency-specific message", async () => {
-  const fetchImpl = (async () =>
-    new Response(JSON.stringify({ title: "too many" }), { status: 429 })) as typeof fetch;
+  const fetchImpl = (async () => new Response(JSON.stringify({ title: "too many" }), { status: 429 })) as typeof fetch;
   await assert.rejects(
     () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
     (e: unknown) => {
@@ -78,8 +70,7 @@ test("createJob maps 429 to BATCH_QUOTA_EXCEEDED with a concurrency-specific mes
 });
 
 test("createJob maps 402 to BATCH_QUOTA_EXCEEDED with a billing-specific message", async () => {
-  const fetchImpl = (async () =>
-    new Response(JSON.stringify({ title: "no credit" }), { status: 402 })) as typeof fetch;
+  const fetchImpl = (async () => new Response(JSON.stringify({ title: "no credit" }), { status: 402 })) as typeof fetch;
   await assert.rejects(
     () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
     (e: unknown) => {
@@ -148,7 +139,10 @@ test("a network failure (fetch throws) becomes BACKEND_UNAVAILABLE, not an uncau
 
 test("a 200 response with a non-JSON body raises BATCH_FAILED instead of throwing a raw SyntaxError", async () => {
   const fetchImpl = (async () =>
-    new Response("not json", { status: 200, headers: { "content-type": "text/plain" } })) as typeof fetch;
+    new Response("not json", {
+      status: 200,
+      headers: { "content-type": "text/plain" },
+    })) as typeof fetch;
 
   await assert.rejects(
     () => getJob("job-1", { apiKey: "k", fetchImpl }),
@@ -202,7 +196,10 @@ test("listResults follows next_cursor across multiple pages and stops when it's 
   }) as typeof fetch;
 
   const results = await listResults("job-1", { apiKey: "k", fetchImpl });
-  assert.deepEqual(results.map((r) => r.task_id), ["a", "b", "c"]);
+  assert.deepEqual(
+    results.map((r) => r.task_id),
+    ["a", "b", "c"]
+  );
   assert.deepEqual(seenCursors, [undefined, "page2"]);
 });
 
@@ -214,7 +211,10 @@ test("waitForJob polls until a terminal status is reached", async () => {
     return new Response(
       JSON.stringify({
         job_id: "job-1",
-        latest_run: { status, stats: { total: 1, completed: calls >= 3 ? 1 : 0, successful: 0, failed: 0 } },
+        latest_run: {
+          status,
+          stats: { total: 1, completed: calls >= 3 ? 1 : 0, successful: 0, failed: 0 },
+        },
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );
@@ -230,7 +230,10 @@ test("waitForJob raises BATCH_FAILED once the poll deadline passes without a ter
     new Response(
       JSON.stringify({
         job_id: "job-1",
-        latest_run: { status: "running", stats: { total: 1, completed: 0, successful: 0, failed: 0 } },
+        latest_run: {
+          status: "running",
+          stats: { total: 1, completed: 0, successful: 0, failed: 0 },
+        },
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     )) as typeof fetch;

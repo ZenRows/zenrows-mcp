@@ -125,8 +125,7 @@ let discoveredSignupUrl: string | null | undefined;
 
 export async function discoverSignupUrl(opts: { fetchImpl?: typeof fetch } = {}): Promise<string | null> {
   try {
-    const base =
-      process.env[DISCOVERY_URL_ENV]?.trim() || new URL(AGENT_SIGNUP_API_URL).origin;
+    const base = process.env[DISCOVERY_URL_ENV]?.trim() || new URL(AGENT_SIGNUP_API_URL).origin;
     const url = base.replace(/\/$/, "") + WELL_KNOWN_PROTECTED_RESOURCE;
     const doFetch = opts.fetchImpl ?? fetch;
     const res = await doFetch(url, {
@@ -194,11 +193,13 @@ export async function signupAgent(
  * Ensure an API key is available for stdio.
  * Returns the key and optional claim metadata when a new account was provisioned.
  */
-export async function ensureApiKey(opts: {
-  fetchImpl?: typeof fetch;
-  userAgent?: string;
-  onProvision?: (a: AgentAccount) => void;
-} = {}): Promise<{ apiKey: string; provisioned?: AgentAccount }> {
+export async function ensureApiKey(
+  opts: {
+    fetchImpl?: typeof fetch;
+    userAgent?: string;
+    onProvision?: (a: AgentAccount) => void;
+  } = {}
+): Promise<{ apiKey: string; provisioned?: AgentAccount }> {
   const existing = resolveApiKey();
   if (existing.key) return { apiKey: existing.key };
 

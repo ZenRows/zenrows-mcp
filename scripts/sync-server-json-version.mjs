@@ -35,7 +35,9 @@ else if (npmPkg.version !== version) drifts.push(`packages[npm].version=${npmPkg
 if (checkOnly) {
   if (drifts.length) {
     console.error(
-      `server.json out of sync with ${version} (package.json${process.env.VERSION ? " / VERSION" : ""}): ${drifts.join(", ")}`,
+      `server.json out of sync with ${version} (package.json${process.env.VERSION ? " / VERSION" : ""}): ${drifts.join(
+        ", "
+      )}`
     );
     process.exit(1);
   }

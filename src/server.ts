@@ -16,8 +16,7 @@ const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 const DEFAULT_JS_RENDER = process.env.ZENROWS_JS_RENDER === "true";
 const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
-  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ??
-  "markdown";
+  (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
 
 export function createServer(apiKey: string, clientName?: string): McpServer {
   const server = new McpServer({
@@ -189,8 +188,7 @@ Examples:
       )
         searchParams.set("js_render", "true");
       if (params.premium_proxy || DEFAULT_PREMIUM_PROXY) searchParams.set("premium_proxy", "true");
-      if (params.proxy_country)
-        searchParams.set("proxy_country", params.proxy_country.toUpperCase());
+      if (params.proxy_country) searchParams.set("proxy_country", params.proxy_country.toUpperCase());
       if (params.autoparse) searchParams.set("autoparse", "true");
       if (params.css_extractor) searchParams.set("css_extractor", params.css_extractor);
       if (params.wait_for) searchParams.set("wait_for", params.wait_for);
@@ -200,21 +198,13 @@ Examples:
       if (params.screenshot || params.screenshot_fullpage || params.screenshot_selector)
         searchParams.set("screenshot", "true");
       if (params.screenshot_fullpage) searchParams.set("screenshot_fullpage", "true");
-      if (params.screenshot_selector)
-        searchParams.set("screenshot_selector", params.screenshot_selector);
+      if (params.screenshot_selector) searchParams.set("screenshot_selector", params.screenshot_selector);
 
       // response_type is mutually exclusive with autoparse, css_extractor, outputs, and screenshot params.
       // 'html' is the Zenrows default (no param); all other values are passed through.
-      const isScreenshot =
-        params.screenshot || params.screenshot_fullpage || params.screenshot_selector;
+      const isScreenshot = params.screenshot || params.screenshot_fullpage || params.screenshot_selector;
       const effectiveType = params.response_type ?? DEFAULT_RESPONSE_TYPE;
-      if (
-        !params.autoparse &&
-        !params.css_extractor &&
-        !params.outputs &&
-        !isScreenshot &&
-        effectiveType !== "html"
-      ) {
+      if (!params.autoparse && !params.css_extractor && !params.outputs && !isScreenshot && effectiveType !== "html") {
         searchParams.set("response_type", effectiveType);
       }
 
@@ -254,15 +244,14 @@ Examples:
       const contentType = response.headers.get("content-type") ?? "";
       const buffer = await response.arrayBuffer();
       const bytes = new Uint8Array(buffer);
-      const isPng =
-        bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+      const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
       const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
       if (contentType.startsWith("image/") || isPng || isJpeg) {
         const mimeType = isPng
           ? "image/png"
           : isJpeg
-            ? "image/jpeg"
-            : (contentType.split(";")[0].trim() as "image/png" | "image/jpeg");
+          ? "image/jpeg"
+          : (contentType.split(";")[0].trim() as "image/png" | "image/jpeg");
         const base64 = Buffer.from(buffer).toString("base64");
         return {
           content: [{ type: "image" as const, data: base64, mimeType }],
@@ -308,9 +297,7 @@ Examples:
         url: z.string().url().describe("The webpage URL to extract data from"),
         fields: z
           .string()
-          .describe(
-            'JSON object mapping field names to CSS selectors, e.g. \'{"title":"h1","price":".price"}\''
-          ),
+          .describe('JSON object mapping field names to CSS selectors, e.g. \'{"title":"h1","price":".price"}\''),
       },
     },
     ({ url, fields }) => ({
@@ -330,8 +317,7 @@ Examples:
     "scrape_js_page",
     {
       title: "Scrape JavaScript-Rendered Page",
-      description:
-        "Scrape a page that requires JavaScript rendering (React, Vue, Angular, or any SPA).",
+      description: "Scrape a page that requires JavaScript rendering (React, Vue, Angular, or any SPA).",
       argsSchema: {
         url: z.string().url().describe("The JavaScript-rendered page URL to scrape"),
       },

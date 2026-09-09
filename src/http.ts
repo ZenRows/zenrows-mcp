@@ -165,15 +165,14 @@ app.all("/mcp", async (c) => {
   if (!apiKey) {
     return c.json(
       {
-        error:
-          "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.",
+        error: "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.",
       },
       401,
       {
         "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="${MCP_SERVER}/.well-known/oauth-protected-resource"`,
         // CloudFront strips WWW-Authenticate — add Link header as RFC 8615 fallback
         // so MCP clients can still discover the OAuth server
-        "Link": `<${MCP_SERVER}/.well-known/oauth-protected-resource>; rel="oauth-protected-resource"`,
+        Link: `<${MCP_SERVER}/.well-known/oauth-protected-resource>; rel="oauth-protected-resource"`,
       }
     );
   }

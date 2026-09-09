@@ -2,21 +2,17 @@ import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
-import {
-  BatchError,
-  createJob,
-  getJob,
-  listResults,
-  stopJob,
-  waitForJob,
-} from "../batch-api.js";
+import { BatchError, createJob, getJob, listResults, stopJob, waitForJob } from "../batch-api.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
 
 type TextContent = { type: "text"; text: string };
 
-function err(data: unknown, hint?: { status?: number; code?: string; message?: string }): {
+function err(
+  data: unknown,
+  hint?: { status?: number; code?: string; message?: string }
+): {
   content: TextContent[];
   isError: true;
 } {
@@ -102,18 +98,12 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
           .string()
           .optional()
           .describe("Job-level ISO country code (requires premium_proxy or mode=auto)"),
-        response_type: z
-          .enum(["markdown", "plaintext", "html", "pdf"])
-          .optional()
-          .describe("Job-level response_type"),
+        response_type: z.enum(["markdown", "plaintext", "html", "pdf"]).optional().describe("Job-level response_type"),
         zenrows_params: z
           .record(z.union([z.string(), z.number(), z.boolean()]))
           .optional()
           .describe("Additional job-level zenrows_params merged with the flags above"),
-        wait: z
-          .boolean()
-          .optional()
-          .describe("If true, poll until the job reaches a terminal state before returning"),
+        wait: z.boolean().optional().describe("If true, poll until the job reaches a terminal state before returning"),
         wait_timeout_ms: z
           .number()
           .int()
@@ -131,9 +121,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
         zenrows_params?: Record<string, string | number | boolean>;
       };
       const tasksIn: TaskIn[] =
-        params.tasks && params.tasks.length > 0
-          ? params.tasks
-          : (params.urls ?? []).map((url) => ({ url }));
+        params.tasks && params.tasks.length > 0 ? params.tasks : (params.urls ?? []).map((url) => ({ url }));
       if (!tasksIn.length) {
         return err({
           code: "INVALID_USAGE",
@@ -162,9 +150,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
           if (t.zenrows_params) task.zenrows_params = normalizeParams(t.zenrows_params);
           return task;
         }),
-        ...(Object.keys(jobParams).length
-          ? { zenrows_params: normalizeParams(jobParams) }
-          : {}),
+        ...(Object.keys(jobParams).length ? { zenrows_params: normalizeParams(jobParams) } : {}),
       };
 
       try {
@@ -194,8 +180,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
     "batch_status",
     {
       annotations: { title: "Batch Job Status", readOnlyHint: true, destructiveHint: false },
-      description:
-        "Get status and stats for a Zenrows Batch job (latest_run.status + latest_run.stats).",
+      description: "Get status and stats for a Zenrows Batch job (latest_run.status + latest_run.stats).",
       inputSchema: {
         job_id: z.string().describe("Batch job id returned by batch_create"),
       },
@@ -227,10 +212,7 @@ Each row may include task_id, external_id, status, and a short-lived result_url 
 Download result_url soon — presigned links expire.`,
       inputSchema: {
         job_id: z.string().describe("Batch job id"),
-        status: z
-          .enum(["successful", "failed", "all"])
-          .optional()
-          .describe("Filter results by status (default: all)"),
+        status: z.enum(["successful", "failed", "all"]).optional().describe("Filter results by status (default: all)"),
       },
     },
     async ({ job_id, status }) => {
@@ -273,8 +255,7 @@ Download result_url soon — presigned links expire.`,
     "batch_wait",
     {
       annotations: { title: "Wait for Batch Job", readOnlyHint: true, destructiveHint: false },
-      description:
-        "Poll batch_status until the job reaches a terminal state (completed, stopped, or deleted).",
+      description: "Poll batch_status until the job reaches a terminal state (completed, stopped, or deleted).",
       inputSchema: {
         job_id: z.string().describe("Batch job id"),
         timeout_ms: z

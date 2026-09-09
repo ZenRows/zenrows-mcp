@@ -23,7 +23,12 @@ function json(data: unknown): { content: TextContent[] } {
 
 const sessionId = z.string().describe("Session ID returned by browser_navigate");
 
-export function registerBrowserTools(server: McpServer, apiKey: string, browserUrl: string, getClientName: () => string | undefined): void {
+export function registerBrowserTools(
+  server: McpServer,
+  apiKey: string,
+  browserUrl: string,
+  getClientName: () => string | undefined
+): void {
   const tfetch = (toolName: string) => (method: string, path: string, body?: unknown) =>
     browserFetch(method, path, apiKey, browserUrl, body, getClientName(), toolName);
 
@@ -32,7 +37,11 @@ export function registerBrowserTools(server: McpServer, apiKey: string, browserU
   server.registerTool(
     "browser_navigate",
     {
-      annotations: { title: "Open Browser & Navigate", readOnlyHint: false, destructiveHint: false },
+      annotations: {
+        title: "Open Browser & Navigate",
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
       description: `Open a Zenrows Browser Sessions session and navigate to a URL.
 
 This is the entry point for all browser automation. It creates a new session backed by
@@ -50,7 +59,12 @@ When to use options:
           .string()
           .optional()
           .describe("ISO 3166-1 alpha-2 country code for geo-targeted proxy (e.g. 'US', 'GB', 'DE')"),
-        proxy_region: z.string().optional().describe("World region code for geo-targeted proxy (eu=Europe, na=North America, ap=Asia Pacific, sa=South America, af=Africa, me=Middle East)"),
+        proxy_region: z
+          .string()
+          .optional()
+          .describe(
+            "World region code for geo-targeted proxy (eu=Europe, na=North America, ap=Asia Pacific, sa=South America, af=Africa, me=Middle East)"
+          ),
       },
     },
     async (params) => {
@@ -69,7 +83,9 @@ When to use options:
 
       let navResult;
       try {
-        navResult = await fetch("POST", `/browser/sessions/${session.session_id}/navigate`, { url: params.url });
+        navResult = await fetch("POST", `/browser/sessions/${session.session_id}/navigate`, {
+          url: params.url,
+        });
       } catch (e) {
         // Best-effort cleanup — session was created but navigation failed, free the slot.
         void fetch("DELETE", `/browser/sessions/${session.session_id}`).catch(() => undefined);
@@ -81,7 +97,12 @@ When to use options:
       }
       const nav = navResult.data as { url: string; title: string };
 
-      return json({ session_id: session.session_id, url: nav.url, title: nav.title, expires_at: session.expires_at });
+      return json({
+        session_id: session.session_id,
+        url: nav.url,
+        title: nav.title,
+        expires_at: session.expires_at,
+      });
     }
   );
 
@@ -89,7 +110,8 @@ When to use options:
     "browser_close",
     {
       annotations: { title: "Close Browser Session", readOnlyHint: false, destructiveHint: false },
-      description: "Close a browser session and free all associated resources. Always call this when done to release the browser slot.",
+      description:
+        "Close a browser session and free all associated resources. Always call this when done to release the browser slot.",
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
@@ -169,7 +191,8 @@ When to use options:
     "browser_click",
     {
       annotations: { title: "Click Element", readOnlyHint: false, destructiveHint: false },
-      description: "Click an element on the page using a CSS selector. Use browser_get_accessibility_tree first to find the right selector.",
+      description:
+        "Click an element on the page using a CSS selector. Use browser_get_accessibility_tree first to find the right selector.",
       inputSchema: {
         session_id: sessionId,
         selector: z.string().describe("CSS selector of the element to click"),
@@ -224,7 +247,11 @@ When to use options:
     async ({ session_id, selector, text, clear_first }) => {
       const fetch = tfetch("browser_type");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/type`, { selector, text, clear_first });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/type`, {
+          selector,
+          text,
+          clear_first,
+        });
         if (!result.ok) return err(`Type failed: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -247,7 +274,10 @@ When to use options:
     async ({ session_id, selector, value }) => {
       const fetch = tfetch("browser_fill");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/fill`, { selector, value });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/fill`, {
+          selector,
+          value,
+        });
         if (!result.ok) return err(`Fill failed: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -270,7 +300,10 @@ When to use options:
     async ({ session_id, selector, value }) => {
       const fetch = tfetch("browser_select_option");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/select`, { selector, value });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/select`, {
+          selector,
+          value,
+        });
         if (!result.ok) return err(`Select failed: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -381,7 +414,10 @@ When to use options:
     async ({ session_id, direction, distance }) => {
       const fetch = tfetch("browser_scroll");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/scroll`, { direction, distance });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/scroll`, {
+          direction,
+          distance,
+        });
         if (!result.ok) return err(`Scroll failed: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -496,7 +532,9 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, selector }) => {
       const fetch = tfetch("browser_get_text");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/get_text`, { selector });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/get_text`, {
+          selector,
+        });
         if (!result.ok) return err(`Failed to get text: ${browserError(result)}`);
         const data = result.data as { text: string };
         return { content: [{ type: "text" as const, text: data.text }] };
@@ -520,7 +558,10 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, selector, attribute }) => {
       const fetch = tfetch("browser_get_attribute");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/get_attribute`, { selector, attribute });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/get_attribute`, {
+          selector,
+          attribute,
+        });
         if (!result.ok) return err(`Failed to get attribute: ${browserError(result)}`);
         return json(result.data);
       } catch (e) {
@@ -542,7 +583,9 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, selector }) => {
       const fetch = tfetch("browser_get_html");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/get_html`, { selector });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/get_html`, {
+          selector,
+        });
         if (!result.ok) return err(`Failed to get HTML: ${browserError(result)}`);
         const data = result.data as { html: string };
         return { content: [{ type: "text" as const, text: data.html }] };
@@ -555,7 +598,11 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_query_selector_all",
     {
-      annotations: { title: "Query All Matching Elements", readOnlyHint: true, destructiveHint: false },
+      annotations: {
+        title: "Query All Matching Elements",
+        readOnlyHint: true,
+        destructiveHint: false,
+      },
       description: "Find all elements matching a CSS selector and return their text, HTML, and attributes.",
       inputSchema: {
         session_id: sessionId,
@@ -565,7 +612,9 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, selector }) => {
       const fetch = tfetch("browser_query_selector_all");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/query_selector_all`, { selector });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/query_selector_all`, {
+          selector,
+        });
         if (!result.ok) return err(`Query failed: ${browserError(result)}`);
         return json(result.data);
       } catch (e) {
@@ -580,10 +629,14 @@ labels, and states — everything needed to drive browser interactions.`,
     "browser_screenshot",
     {
       annotations: { title: "Take Screenshot", readOnlyHint: true, destructiveHint: false },
-      description: "Take a screenshot of the current page or a specific element. Use for visual verification or when the accessibility tree is not sufficient.",
+      description:
+        "Take a screenshot of the current page or a specific element. Use for visual verification or when the accessibility tree is not sufficient.",
       inputSchema: {
         session_id: sessionId,
-        full_page: z.boolean().optional().describe("Capture full page including content below the fold (default false)"),
+        full_page: z
+          .boolean()
+          .optional()
+          .describe("Capture full page including content below the fold (default false)"),
         selector: z
           .string()
           .optional()
@@ -593,7 +646,10 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, full_page, selector }) => {
       const fetch = tfetch("browser_screenshot");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/screenshot`, { full_page, selector });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/screenshot`, {
+          full_page,
+          selector,
+        });
         if (!result.ok) return err(`Screenshot failed: ${browserError(result)}`);
         const data = result.data as { data: string; mime_type: "image/png" | "image/jpeg" };
         return {
@@ -626,7 +682,11 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, print_background, landscape, scale }) => {
       const fetch = tfetch("browser_generate_pdf");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/generate_pdf`, { print_background, landscape, scale });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/generate_pdf`, {
+          print_background,
+          landscape,
+          scale,
+        });
         if (!result.ok) return err(`PDF generation failed: ${browserError(result)}`);
         const data = result.data as { data: string; mime_type: string };
         return {
@@ -653,17 +713,24 @@ labels, and states — everything needed to drive browser interactions.`,
     "browser_wait_for_selector",
     {
       annotations: { title: "Wait for Element", readOnlyHint: true, destructiveHint: false },
-      description: "Wait until an element matching the CSS selector is stable in the DOM. Set visible=true to also require the element to be visible (not hidden).",
+      description:
+        "Wait until an element matching the CSS selector is stable in the DOM. Set visible=true to also require the element to be visible (not hidden).",
       inputSchema: {
         session_id: sessionId,
         selector: z.string().describe("CSS selector to wait for"),
-        visible: z.boolean().optional().describe("Also require the element to be visible, not just present in the DOM (default false)"),
+        visible: z
+          .boolean()
+          .optional()
+          .describe("Also require the element to be visible, not just present in the DOM (default false)"),
       },
     },
     async ({ session_id, selector, visible }) => {
       const fetch = tfetch("browser_wait_for_selector");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/wait_for_selector`, { selector, visible });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/wait_for_selector`, {
+          selector,
+          visible,
+        });
         if (!result.ok) return err(`Wait for selector failed: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -676,16 +743,27 @@ labels, and states — everything needed to drive browser interactions.`,
     "browser_wait_for_navigation",
     {
       annotations: { title: "Wait for Navigation", readOnlyHint: true, destructiveHint: false },
-      description: "Wait for the page to navigate to a new URL. IMPORTANT: call this BEFORE the action that triggers navigation (e.g. before browser_click on a submit button), not after — the navigation event may already have fired and this will hang until timeout. If the page stays on the same URL (AJAX/SPA), skip this tool entirely. Optional timeout_ms (default 30000ms).",
+      description:
+        "Wait for the page to navigate to a new URL. IMPORTANT: call this BEFORE the action that triggers navigation (e.g. before browser_click on a submit button), not after — the navigation event may already have fired and this will hang until timeout. If the page stays on the same URL (AJAX/SPA), skip this tool entirely. Optional timeout_ms (default 30000ms).",
       inputSchema: {
         session_id: sessionId,
-        timeout_ms: z.number().int().min(1000).max(60000).optional().describe("How long to wait in milliseconds (default 30000, max 60000)"),
+        timeout_ms: z
+          .number()
+          .int()
+          .min(1000)
+          .max(60000)
+          .optional()
+          .describe("How long to wait in milliseconds (default 30000, max 60000)"),
       },
     },
     async ({ session_id, timeout_ms }) => {
       const fetch = tfetch("browser_wait_for_navigation");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/wait_for_navigation`, timeout_ms ? { timeout_ms } : undefined);
+        const result = await fetch(
+          "POST",
+          `/browser/sessions/${session_id}/wait_for_navigation`,
+          timeout_ms ? { timeout_ms } : undefined
+        );
         if (!result.ok) return err(`Wait for navigation failed: ${browserError(result)}`);
         return json(result.data);
       } catch (e) {
@@ -788,7 +866,9 @@ labels, and states — everything needed to drive browser interactions.`,
       try {
         // Remap http_only → httpOnly to match Chrome DevTools Protocol / Rod's JSON field names.
         const mapped = cookies.map(({ http_only, ...rest }) => ({ ...rest, httpOnly: http_only }));
-        const result = await fetch("POST", `/browser/sessions/${session_id}/cookies`, { cookies: mapped });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/cookies`, {
+          cookies: mapped,
+        });
         if (!result.ok) return err(`Failed to set cookies: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -833,7 +913,11 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, action, key, value }) => {
       const fetch = tfetch("browser_local_storage");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/local_storage`, { action, key, value });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/local_storage`, {
+          action,
+          key,
+          value,
+        });
         if (!result.ok) return err(`Local storage operation failed: ${browserError(result)}`);
         return json(result.data);
       } catch (e) {
@@ -879,7 +963,9 @@ labels, and states — everything needed to drive browser interactions.`,
     async ({ session_id, tab_id }) => {
       const fetch = tfetch("browser_switch_tab");
       try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/switch_tab`, { tab_id });
+        const result = await fetch("POST", `/browser/sessions/${session_id}/switch_tab`, {
+          tab_id,
+        });
         if (!result.ok) return err(`Failed to switch tab: ${browserError(result)}`);
         return ok();
       } catch (e) {
@@ -897,14 +983,23 @@ labels, and states — everything needed to drive browser interactions.`,
     z.object({ type: z.literal("reload") }),
     z.object({ type: z.literal("click"), selector: z.string() }),
     z.object({ type: z.literal("hover"), selector: z.string() }),
-    z.object({ type: z.literal("type"), selector: z.string(), text: z.string(), clear_first: z.boolean().optional() }),
+    z.object({
+      type: z.literal("type"),
+      selector: z.string(),
+      text: z.string(),
+      clear_first: z.boolean().optional(),
+    }),
     z.object({ type: z.literal("fill"), selector: z.string(), value: z.string() }),
     z.object({ type: z.literal("select"), selector: z.string(), value: z.string() }),
     z.object({ type: z.literal("check"), selector: z.string() }),
     z.object({ type: z.literal("uncheck"), selector: z.string() }),
     z.object({ type: z.literal("focus"), selector: z.string() }),
     z.object({ type: z.literal("press_key"), key: z.string() }),
-    z.object({ type: z.literal("scroll"), direction: z.enum(["up", "down", "left", "right"]), distance: z.number().optional() }),
+    z.object({
+      type: z.literal("scroll"),
+      direction: z.enum(["up", "down", "left", "right"]),
+      distance: z.number().optional(),
+    }),
     z.object({ type: z.literal("drag"), source_selector: z.string(), target_selector: z.string() }),
     z.object({ type: z.literal("get_accessibility_tree") }),
     z.object({ type: z.literal("get_url") }),
@@ -913,8 +1008,16 @@ labels, and states — everything needed to drive browser interactions.`,
     z.object({ type: z.literal("get_attribute"), selector: z.string(), attribute: z.string() }),
     z.object({ type: z.literal("get_html"), selector: z.string().optional() }),
     z.object({ type: z.literal("query_selector_all"), selector: z.string() }),
-    z.object({ type: z.literal("screenshot"), full_page: z.boolean().optional(), selector: z.string().optional() }),
-    z.object({ type: z.literal("wait_for_selector"), selector: z.string(), visible: z.boolean().optional() }),
+    z.object({
+      type: z.literal("screenshot"),
+      full_page: z.boolean().optional(),
+      selector: z.string().optional(),
+    }),
+    z.object({
+      type: z.literal("wait_for_selector"),
+      selector: z.string(),
+      visible: z.boolean().optional(),
+    }),
     z.object({ type: z.literal("wait_for_navigation") }),
     z.object({ type: z.literal("wait"), ms: z.number().int().min(0).max(30000) }),
     z.object({ type: z.literal("evaluate"), script: z.string() }),
@@ -922,7 +1025,11 @@ labels, and states — everything needed to drive browser interactions.`,
 
   type BatchAction = z.infer<typeof batchAction>;
 
-  async function runAction(action: BatchAction, session_id: string, fetch: ReturnType<typeof tfetch>): Promise<unknown> {
+  async function runAction(
+    action: BatchAction,
+    session_id: string,
+    fetch: ReturnType<typeof tfetch>
+  ): Promise<unknown> {
     const sid = session_id;
     switch (action.type) {
       case "navigate": {
@@ -946,42 +1053,62 @@ labels, and states — everything needed to drive browser interactions.`,
         return r.data;
       }
       case "click": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/click`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/click`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "hover": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/hover`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/hover`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "type": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/type`, { selector: action.selector, text: action.text, clear_first: action.clear_first });
+        const r = await fetch("POST", `/browser/sessions/${sid}/type`, {
+          selector: action.selector,
+          text: action.text,
+          clear_first: action.clear_first,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "fill": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/fill`, { selector: action.selector, value: action.value });
+        const r = await fetch("POST", `/browser/sessions/${sid}/fill`, {
+          selector: action.selector,
+          value: action.value,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "select": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/select`, { selector: action.selector, value: action.value });
+        const r = await fetch("POST", `/browser/sessions/${sid}/select`, {
+          selector: action.selector,
+          value: action.value,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "check": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/check`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/check`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "uncheck": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/uncheck`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/uncheck`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "focus": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/focus`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/focus`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
@@ -991,12 +1118,18 @@ labels, and states — everything needed to drive browser interactions.`,
         return { ok: true };
       }
       case "scroll": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/scroll`, { direction: action.direction, distance: action.distance });
+        const r = await fetch("POST", `/browser/sessions/${sid}/scroll`, {
+          direction: action.direction,
+          distance: action.distance,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
       case "drag": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/drag`, { source_selector: action.source_selector, target_selector: action.target_selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/drag`, {
+          source_selector: action.source_selector,
+          target_selector: action.target_selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
@@ -1016,27 +1149,39 @@ labels, and states — everything needed to drive browser interactions.`,
         return r.data;
       }
       case "get_text": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/get_text`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/get_text`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return (r.data as { text: string }).text;
       }
       case "get_attribute": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/get_attribute`, { selector: action.selector, attribute: action.attribute });
+        const r = await fetch("POST", `/browser/sessions/${sid}/get_attribute`, {
+          selector: action.selector,
+          attribute: action.attribute,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return r.data;
       }
       case "get_html": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/get_html`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/get_html`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return (r.data as { html: string }).html;
       }
       case "query_selector_all": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/query_selector_all`, { selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/query_selector_all`, {
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return r.data;
       }
       case "screenshot": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/screenshot`, { full_page: action.full_page, selector: action.selector });
+        const r = await fetch("POST", `/browser/sessions/${sid}/screenshot`, {
+          full_page: action.full_page,
+          selector: action.selector,
+        });
         if (!r.ok) throw new Error(browserError(r));
         // Return as data URI string so it fits in the JSON result array.
         // For proper image rendering, use browser_screenshot directly.
@@ -1044,7 +1189,10 @@ labels, and states — everything needed to drive browser interactions.`,
         return { mime_type: d.mime_type, data: d.data };
       }
       case "wait_for_selector": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/wait_for_selector`, { selector: action.selector, visible: action.visible });
+        const r = await fetch("POST", `/browser/sessions/${sid}/wait_for_selector`, {
+          selector: action.selector,
+          visible: action.visible,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return { ok: true };
       }
@@ -1059,7 +1207,9 @@ labels, and states — everything needed to drive browser interactions.`,
         return { ok: true };
       }
       case "evaluate": {
-        const r = await fetch("POST", `/browser/sessions/${sid}/evaluate`, { script: action.script });
+        const r = await fetch("POST", `/browser/sessions/${sid}/evaluate`, {
+          script: action.script,
+        });
         if (!r.ok) throw new Error(browserError(r));
         return r.data;
       }
@@ -1069,7 +1219,11 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_batch",
     {
-      annotations: { title: "Run Batch of Browser Actions", readOnlyHint: false, destructiveHint: false },
+      annotations: {
+        title: "Run Batch of Browser Actions",
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
       description: `Execute a sequence of browser actions in a single call against an existing session.
 
 Use this when you already know the full sequence of steps — it reduces round trips and
@@ -1082,9 +1236,13 @@ Note: screenshots in batch results are returned as base64 strings inside the JSO
 For proper image rendering, use browser_screenshot directly.`,
       inputSchema: {
         session_id: sessionId,
-        actions: z.array(batchAction).min(1).max(50).describe(
-          "Ordered list of actions to perform. Each action has a 'type' field plus type-specific parameters."
-        ),
+        actions: z
+          .array(batchAction)
+          .min(1)
+          .max(50)
+          .describe(
+            "Ordered list of actions to perform. Each action has a 'type' field plus type-specific parameters."
+          ),
         stop_on_error: z.boolean().optional().describe("Stop executing on the first failed action (default true)"),
       },
     },
@@ -1102,7 +1260,12 @@ For proper image rendering, use browser_screenshot directly.`,
           results.push({ step: i, type: action.type, error: msg });
           if (stop_on_error) {
             return {
-              content: [{ type: "text" as const, text: JSON.stringify({ completed: i, total: actions.length, results }) }],
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ completed: i, total: actions.length, results }),
+                },
+              ],
               isError: true as const,
             };
           }
