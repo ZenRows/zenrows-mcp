@@ -4,10 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import {
-  appendClaimHint,
-  isQuotaOrPlanError,
-} from "../src/auth/claim-hint.ts";
+import { appendClaimHint, isQuotaOrPlanError } from "../src/auth/claim-hint.ts";
 
 let home: string;
 let savedHome: string | undefined;
@@ -61,18 +58,43 @@ test("isQuotaOrPlanError detects 402 and credit/quota signals", () => {
     }),
     false
   );
+  // AUTH004 is "Usage Exceeded" — the allowance itself is spent — not concurrency.
+  // It was previously skipped on the opposite belief, which silenced the claim nudge at
+  // the one moment an unclaimed Free agent most needs it.
   assert.equal(
     isQuotaOrPlanError({
       status: 402,
-      body: JSON.stringify({ code: "AUTH004", title: "Concurrency limit reached (AUTH004)" }),
+      body: JSON.stringify({ code: "AUTH004", title: "Usage exceeded (AUTH004)" }),
+    }),
+    true
+  );
+  // AUTH006 is the concurrency limit, and is genuinely not an allowance problem.
+  assert.equal(
+    isQuotaOrPlanError({
+      status: 402,
+      body: JSON.stringify({ code: "AUTH006", title: "Concurrency limit reached (AUTH006)" }),
     }),
     false
   );
 });
 
+test("appendClaimHint nudges an unclaimed agent that has spent its allowance", () => {
+  writeUnclaimed("https://app.zenrows.com/claim/xyz");
+  const msg = 'Zenrows error 402: {"code":"AUTH004","title":"Usage exceeded (AUTH004)"}';
+  const out = appendClaimHint(msg, { status: 402, body: msg });
+  assert.match(out, /Claim your Free account/);
+  assert.match(out, /https:\/\/app\.zenrows\.com\/claim\/xyz/);
+});
+
+test("appendClaimHint stays quiet on a concurrency error", () => {
+  writeUnclaimed();
+  const msg = 'Zenrows error 402: {"code":"AUTH006","title":"Concurrency limit reached (AUTH006)"}';
+  assert.equal(appendClaimHint(msg, { status: 402, body: msg }), msg);
+});
+
 test("appendClaimHint adds claim URL when unclaimed and quota/plan error", () => {
   writeUnclaimed("https://app.zenrows.com/claim/abc");
-  const msg = "Zenrows error 402: {\"code\":\"AUTH001\"}";
+  const msg = 'Zenrows error 402: {"code":"AUTH001"}';
   const out = appendClaimHint(msg, { status: 402, body: msg });
   assert.match(out, /Claim your Free account/);
   assert.match(out, /https:\/\/app\.zenrows\.com\/claim\/abc/);
