@@ -36,6 +36,28 @@ function extractApiKey(req: Request): string | undefined {
 const AUTH_SERVER = process.env.OAUTH_AUTH_SERVER ?? "https://app.zenrows.com";
 const MCP_SERVER = process.env.MCP_SERVER ?? "https://mcp.zenrows.com";
 
+/**
+ * The scope this resource issues, named after what it actually grants.
+ *
+ * The access token IS the account's Zenrows API key: the authorization server hands
+ * the key back at /oauth/mcp/token, and every tool here calls the API with it. So an
+ * approved client can do anything the key can do, and one scope named `api` is the
+ * whole truth.
+ *
+ * It used to be declared as `[]`, which is worse than saying nothing: an empty list
+ * reads to a least-privilege client as "this resource has no scopes", when what we
+ * meant was "we never wrote them down".
+ *
+ * Splitting this — reading a page under one scope, spending credits on a
+ * 100,000-URL batch under another — is not an edit to this array. The token would
+ * have to carry the grant, and today it cannot: it is an opaque API key, minted by
+ * app.zenrows.com, and a raw key pasted straight into the Authorization header is a
+ * supported way to connect. Until the token can say what it was granted, this list
+ * must not claim more than one, because a scope we do not enforce is a lie told to
+ * exactly the clients careful enough to read it.
+ */
+const SCOPES_SUPPORTED = ["api"];
+
 app.get("/mcp/.well-known/oauth-authorization-server", (c) =>
   c.redirect("/.well-known/oauth-authorization-server", 301)
 );
@@ -47,7 +69,8 @@ app.get("/.well-known/oauth-protected-resource", (c) =>
     resource: MCP_SERVER,
     authorization_servers: [MCP_SERVER],
     bearer_methods_supported: ["header", "query"],
-    scopes_supported: [],
+    scopes_supported: SCOPES_SUPPORTED,
+    resource_documentation: "https://docs.zenrows.com",
   })
 );
 
@@ -64,6 +87,7 @@ app.get("/.well-known/oauth-authorization-server", (c) =>
     grant_types_supported: ["authorization_code"],
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
+    scopes_supported: SCOPES_SUPPORTED,
   })
 );
 
@@ -169,7 +193,9 @@ app.all("/mcp", async (c) => {
       },
       401,
       {
-        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", resource_metadata="${MCP_SERVER}/.well-known/oauth-protected-resource"`,
+        // RFC 6750: name the scope in the challenge too, so a client learns what it is
+        // being asked for without a second fetch of the metadata document.
+        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(" ")}", resource_metadata="${MCP_SERVER}/.well-known/oauth-protected-resource"`,
         // CloudFront strips WWW-Authenticate — add Link header as RFC 8615 fallback
         // so MCP clients can still discover the OAuth server
         Link: `<${MCP_SERVER}/.well-known/oauth-protected-resource>; rel="oauth-protected-resource"`,
