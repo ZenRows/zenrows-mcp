@@ -1,6 +1,6 @@
 {
   "name": "@zenrows/mcp",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "Zenrows MCP server — Fetch, Extract, Batch, and Browser Sessions for AI coding assistants",
   "type": "module",
   "bin": {
