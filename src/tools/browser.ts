@@ -57,11 +57,11 @@ When to use options:
         url: z.string().url().describe("The URL to navigate to"),
         proxy_country: z
           .string()
-          .optional()
+          .nullish()
           .describe("ISO 3166-1 alpha-2 country code for geo-targeted proxy (e.g. 'US', 'GB', 'DE')"),
         proxy_region: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "World region code for geo-targeted proxy (eu=Europe, na=North America, ap=Asia Pacific, sa=South America, af=Africa, me=Middle East)"
           ),
@@ -241,7 +241,7 @@ When to use options:
         session_id: sessionId,
         selector: z.string().describe("CSS selector of the input element"),
         text: z.string().describe("Text to type"),
-        clear_first: z.boolean().optional().describe("Clear existing content before typing (default false)"),
+        clear_first: z.boolean().nullish().describe("Clear existing content before typing (default false)"),
       },
     },
     async ({ session_id, selector, text, clear_first }) => {
@@ -408,7 +408,7 @@ When to use options:
       inputSchema: {
         session_id: sessionId,
         direction: z.enum(["up", "down", "left", "right"]).describe("Scroll direction"),
-        distance: z.number().int().positive().optional().describe("Pixels to scroll (default 500)"),
+        distance: z.number().int().positive().nullish().describe("Pixels to scroll (default 500)"),
       },
     },
     async ({ session_id, direction, distance }) => {
@@ -526,7 +526,7 @@ labels, and states — everything needed to drive browser interactions.`,
       description: "Get the visible text content of an element or the entire page body.",
       inputSchema: {
         session_id: sessionId,
-        selector: z.string().optional().describe("CSS selector of the element (omit for full page body text)"),
+        selector: z.string().nullish().describe("CSS selector of the element (omit for full page body text)"),
       },
     },
     async ({ session_id, selector }) => {
@@ -577,7 +577,7 @@ labels, and states — everything needed to drive browser interactions.`,
       description: "Get the HTML source of an element or the full page.",
       inputSchema: {
         session_id: sessionId,
-        selector: z.string().optional().describe("CSS selector of the element (omit for full page HTML)"),
+        selector: z.string().nullish().describe("CSS selector of the element (omit for full page HTML)"),
       },
     },
     async ({ session_id, selector }) => {
@@ -635,11 +635,11 @@ labels, and states — everything needed to drive browser interactions.`,
         session_id: sessionId,
         full_page: z
           .boolean()
-          .optional()
+          .nullish()
           .describe("Capture full page including content below the fold (default false)"),
         selector: z
           .string()
-          .optional()
+          .nullish()
           .describe("CSS selector to capture only a specific element (overrides full_page)"),
       },
     },
@@ -674,9 +674,9 @@ labels, and states — everything needed to drive browser interactions.`,
       description: "Render the current page as a PDF document.",
       inputSchema: {
         session_id: sessionId,
-        print_background: z.boolean().optional().describe("Print background graphics (default false)"),
-        landscape: z.boolean().optional().describe("Landscape orientation (default false)"),
-        scale: z.number().min(0.1).max(2).optional().describe("Page scale factor (default 1)"),
+        print_background: z.boolean().nullish().describe("Print background graphics (default false)"),
+        landscape: z.boolean().nullish().describe("Landscape orientation (default false)"),
+        scale: z.number().min(0.1).max(2).nullish().describe("Page scale factor (default 1)"),
       },
     },
     async ({ session_id, print_background, landscape, scale }) => {
@@ -720,7 +720,7 @@ labels, and states — everything needed to drive browser interactions.`,
         selector: z.string().describe("CSS selector to wait for"),
         visible: z
           .boolean()
-          .optional()
+          .nullish()
           .describe("Also require the element to be visible, not just present in the DOM (default false)"),
       },
     },
@@ -752,7 +752,7 @@ labels, and states — everything needed to drive browser interactions.`,
           .int()
           .min(1000)
           .max(60000)
-          .optional()
+          .nullish()
           .describe("How long to wait in milliseconds (default 30000, max 60000)"),
       },
     },
@@ -851,11 +851,11 @@ labels, and states — everything needed to drive browser interactions.`,
             z.object({
               name: z.string(),
               value: z.string(),
-              domain: z.string().optional(),
-              path: z.string().optional(),
-              expires: z.number().optional().describe("Unix timestamp"),
-              http_only: z.boolean().optional(),
-              secure: z.boolean().optional(),
+              domain: z.string().nullish(),
+              path: z.string().nullish(),
+              expires: z.number().nullish().describe("Unix timestamp"),
+              http_only: z.boolean().nullish(),
+              secure: z.boolean().nullish(),
             })
           )
           .describe("Array of cookie objects to set"),
@@ -906,8 +906,8 @@ labels, and states — everything needed to drive browser interactions.`,
       inputSchema: {
         session_id: sessionId,
         action: z.enum(["get", "set", "clear"]).describe("Operation: get a value, set a value, or clear all"),
-        key: z.string().optional().describe("Storage key (required for get and set)"),
-        value: z.string().optional().describe("Value to store (required for set)"),
+        key: z.string().nullish().describe("Storage key (required for get and set)"),
+        value: z.string().nullish().describe("Value to store (required for set)"),
       },
     },
     async ({ session_id, action, key, value }) => {
@@ -935,7 +935,7 @@ labels, and states — everything needed to drive browser interactions.`,
       description: "Open a new browser tab. Returns a tab_id to use with browser_switch_tab.",
       inputSchema: {
         session_id: sessionId,
-        url: z.string().url().optional().describe("URL to open in the new tab (opens blank tab if omitted)"),
+        url: z.string().url().nullish().describe("URL to open in the new tab (opens blank tab if omitted)"),
       },
     },
     async ({ session_id, url }) => {
@@ -987,7 +987,7 @@ labels, and states — everything needed to drive browser interactions.`,
       type: z.literal("type"),
       selector: z.string(),
       text: z.string(),
-      clear_first: z.boolean().optional(),
+      clear_first: z.boolean().nullish(),
     }),
     z.object({ type: z.literal("fill"), selector: z.string(), value: z.string() }),
     z.object({ type: z.literal("select"), selector: z.string(), value: z.string() }),
@@ -998,25 +998,25 @@ labels, and states — everything needed to drive browser interactions.`,
     z.object({
       type: z.literal("scroll"),
       direction: z.enum(["up", "down", "left", "right"]),
-      distance: z.number().optional(),
+      distance: z.number().nullish(),
     }),
     z.object({ type: z.literal("drag"), source_selector: z.string(), target_selector: z.string() }),
     z.object({ type: z.literal("get_accessibility_tree") }),
     z.object({ type: z.literal("get_url") }),
     z.object({ type: z.literal("get_title") }),
-    z.object({ type: z.literal("get_text"), selector: z.string().optional() }),
+    z.object({ type: z.literal("get_text"), selector: z.string().nullish() }),
     z.object({ type: z.literal("get_attribute"), selector: z.string(), attribute: z.string() }),
-    z.object({ type: z.literal("get_html"), selector: z.string().optional() }),
+    z.object({ type: z.literal("get_html"), selector: z.string().nullish() }),
     z.object({ type: z.literal("query_selector_all"), selector: z.string() }),
     z.object({
       type: z.literal("screenshot"),
-      full_page: z.boolean().optional(),
-      selector: z.string().optional(),
+      full_page: z.boolean().nullish(),
+      selector: z.string().nullish(),
     }),
     z.object({
       type: z.literal("wait_for_selector"),
       selector: z.string(),
-      visible: z.boolean().optional(),
+      visible: z.boolean().nullish(),
     }),
     z.object({ type: z.literal("wait_for_navigation") }),
     z.object({ type: z.literal("wait"), ms: z.number().int().min(0).max(30000) }),
@@ -1243,7 +1243,7 @@ For proper image rendering, use browser_screenshot directly.`,
           .describe(
             "Ordered list of actions to perform. Each action has a 'type' field plus type-specific parameters."
           ),
-        stop_on_error: z.boolean().optional().describe("Stop executing on the first failed action (default true)"),
+        stop_on_error: z.boolean().nullish().describe("Stop executing on the first failed action (default true)"),
       },
     },
     async ({ session_id, actions, stop_on_error = true }) => {

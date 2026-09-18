@@ -60,11 +60,11 @@ function normalizeParams(obj: Record<string, unknown>): Record<string, string> {
 
 const taskSchema = z.object({
   url: z.string().url().describe("Target URL for this task"),
-  external_id: z.string().optional().describe("Optional stable id echoed back on results"),
-  metadata: z.unknown().optional().describe("Opaque per-task metadata carried through to results"),
+  external_id: z.string().nullish().describe("Optional stable id echoed back on results"),
+  metadata: z.unknown().nullish().describe("Opaque per-task metadata carried through to results"),
   zenrows_params: z
     .record(z.union([z.string(), z.number(), z.boolean()]))
-    .optional()
+    .nullish()
     .describe("Per-task Zenrows scrape params (js_render, premium_proxy, extract, autoparse, …)"),
 });
 
@@ -86,30 +86,30 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
       inputSchema: {
         tasks: z
           .array(taskSchema)
-          .optional()
+          .nullish()
           .describe("List of tasks (each needs a url). Prefer this over urls when you need per-task params."),
         urls: z
           .array(z.string().url())
-          .optional()
+          .nullish()
           .describe("Shorthand: list of URLs (converted to tasks). Ignored when tasks is provided."),
-        js_render: z.boolean().optional().describe("Job-level js_render for all tasks"),
-        premium_proxy: z.boolean().optional().describe("Job-level premium_proxy for all tasks"),
+        js_render: z.boolean().nullish().describe("Job-level js_render for all tasks"),
+        premium_proxy: z.boolean().nullish().describe("Job-level premium_proxy for all tasks"),
         proxy_country: z
           .string()
-          .optional()
+          .nullish()
           .describe("Job-level ISO country code (requires premium_proxy or mode=auto)"),
-        response_type: z.enum(["markdown", "plaintext", "html", "pdf"]).optional().describe("Job-level response_type"),
+        response_type: z.enum(["markdown", "plaintext", "html", "pdf"]).nullish().describe("Job-level response_type"),
         zenrows_params: z
           .record(z.union([z.string(), z.number(), z.boolean()]))
-          .optional()
+          .nullish()
           .describe("Additional job-level zenrows_params merged with the flags above"),
-        wait: z.boolean().optional().describe("If true, poll until the job reaches a terminal state before returning"),
+        wait: z.boolean().nullish().describe("If true, poll until the job reaches a terminal state before returning"),
         wait_timeout_ms: z
           .number()
           .int()
           .min(1000)
           .max(3_600_000)
-          .optional()
+          .nullish()
           .describe("Max wait time when wait=true (default 600000)"),
       },
     },
@@ -146,7 +146,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
             zenrows_params?: Record<string, string>;
           } = { url: t.url };
           if (t.external_id) task.external_id = t.external_id;
-          if (t.metadata !== undefined) task.metadata = t.metadata;
+          if (t.metadata != null) task.metadata = t.metadata;
           if (t.zenrows_params) task.zenrows_params = normalizeParams(t.zenrows_params);
           return task;
         }),
@@ -212,12 +212,12 @@ Each row may include task_id, external_id, status, and a short-lived result_url 
 Download result_url soon — presigned links expire.`,
       inputSchema: {
         job_id: z.string().describe("Batch job id"),
-        status: z.enum(["successful", "failed", "all"]).optional().describe("Filter results by status (default: all)"),
+        status: z.enum(["successful", "failed", "all"]).nullish().describe("Filter results by status (default: all)"),
       },
     },
     async ({ job_id, status }) => {
       try {
-        const results = await listResults(job_id, { ...call, status });
+        const results = await listResults(job_id, { ...call, status: status ?? undefined });
         return json({ ok: true, job_id, count: results.length, results });
       } catch (e) {
         return batchErr(e);
@@ -263,7 +263,7 @@ Download result_url soon — presigned links expire.`,
           .int()
           .min(1000)
           .max(3_600_000)
-          .optional()
+          .nullish()
           .describe("Max wait time in ms (default 600000)"),
       },
     },

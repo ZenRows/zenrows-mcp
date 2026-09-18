@@ -59,7 +59,7 @@ Examples:
 
         js_render: z
           .boolean()
-          .optional()
+          .nullish()
           .default(false)
           .describe(
             "Enable JavaScript rendering via headless browser. Required for SPAs " +
@@ -68,7 +68,7 @@ Examples:
 
         premium_proxy: z
           .boolean()
-          .optional()
+          .nullish()
           .default(false)
           .describe(
             "Use premium residential proxies to bypass anti-bot protection. " +
@@ -77,7 +77,7 @@ Examples:
 
         proxy_country: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Country for geo-targeted scraping. ISO 3166-1 alpha-2 code (e.g. 'US', 'GB', 'DE'). " +
               "Requires premium_proxy=true."
@@ -85,7 +85,7 @@ Examples:
 
         response_type: z
           .enum(["markdown", "plaintext", "pdf", "html"])
-          .optional()
+          .nullish()
           .default("markdown")
           .describe(
             "Output format. 'markdown' (default) preserves structure and is ideal for LLMs. " +
@@ -97,7 +97,7 @@ Examples:
 
         autoparse: z
           .boolean()
-          .optional()
+          .nullish()
           .describe(
             "Automatically extract structured data from the page into JSON. " +
               "Best for product pages, articles, and listings."
@@ -105,7 +105,7 @@ Examples:
 
         css_extractor: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Extract specific elements using CSS selectors. " +
               'JSON object mapping names to selectors, e.g. \'{"title":"h1","price":".price-tag"}\'. ' +
@@ -114,7 +114,7 @@ Examples:
 
         wait_for: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "CSS selector to wait for before capturing. Use when key content loads " +
               "after the initial page render. Requires js_render=true."
@@ -125,7 +125,7 @@ Examples:
           .int()
           .min(0)
           .max(30000)
-          .optional()
+          .nullish()
           .describe(
             "Milliseconds to wait after page load before capturing content. " +
               "Max 30000 (30s). Requires js_render=true."
@@ -133,7 +133,7 @@ Examples:
 
         js_instructions: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "JSON array of browser interactions to run before scraping. Requires js_render=true. " +
               'Example: [{"click":"#load-more"},{"wait":1000},{"wait_for":".results"}]'
@@ -141,7 +141,7 @@ Examples:
 
         outputs: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Comma-separated list of data types to extract as structured JSON. " +
               "Available: emails, headings, links, menus, images, videos, audios. " +
@@ -150,7 +150,7 @@ Examples:
 
         screenshot: z
           .boolean()
-          .optional()
+          .nullish()
           .describe(
             "Capture an above-the-fold screenshot of the page. " +
               "Returns an image instead of text content. Useful for visual verification or debugging."
@@ -158,7 +158,7 @@ Examples:
 
         screenshot_fullpage: z
           .boolean()
-          .optional()
+          .nullish()
           .describe(
             "Capture a full-page screenshot including content below the fold. " +
               "Returns an image instead of text content."
@@ -166,7 +166,7 @@ Examples:
 
         screenshot_selector: z
           .string()
-          .optional()
+          .nullish()
           .describe(
             "Capture a screenshot of a specific element using a CSS selector. " +
               'Example: ".product-card". Returns an image instead of text content.'
