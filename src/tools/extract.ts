@@ -223,6 +223,18 @@ export async function runExtract(
   };
 }
 
+/**
+ * The tool schemas accept `null` for an unset optional parameter, because clients
+ * that build their payload from a typed model (CrewAI, and anything else backed by
+ * Pydantic) serialise "not set" as null rather than omitting the key. Everything
+ * below this boundary still expects `undefined`, so the nulls are dropped once, here.
+ */
+type WithoutNulls<T> = { [K in keyof T]: Exclude<T[K], null> };
+
+function withoutNulls<T extends Record<string, unknown>>(params: T): WithoutNulls<T> {
+  return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== null)) as WithoutNulls<T>;
+}
+
 export function registerExtractTool(server: McpServer, apiKey: string, getClientName: () => string | undefined): void {
   server.registerTool(
     "extract",
@@ -248,34 +260,34 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
         url: z.string().url().describe("The webpage URL to extract from"),
         mode: z
           .enum(["auto", "autoparse", "css"])
-          .optional()
+          .nullish()
           .default("auto")
           .describe("Extraction mode: auto (extract=auto, default), autoparse, or css (requires css_extractor)"),
         css_extractor: z
           .string()
-          .optional()
+          .nullish()
           .describe('Required when mode=css. JSON map of field→selector, e.g. \'{"title":"h1","price":".price"}\''),
-        js_render: z.boolean().optional().describe("Enable headless JS rendering (SPAs / dynamic content)"),
+        js_render: z.boolean().nullish().describe("Enable headless JS rendering (SPAs / dynamic content)"),
         premium_proxy: z
           .boolean()
-          .optional()
+          .nullish()
           .describe("Use premium residential proxies (anti-bot). Higher credit cost."),
         proxy_country: z
           .string()
-          .optional()
+          .nullish()
           .describe("ISO 3166-1 alpha-2 country code. Requires premium_proxy or mode_auto."),
-        mode_auto: z.boolean().optional().describe("Enable Adaptive Stealth Mode (mode=auto) for tougher sites"),
-        wait_for: z.string().optional().describe("CSS selector to wait for before extracting. Requires js_render."),
+        mode_auto: z.boolean().nullish().describe("Enable Adaptive Stealth Mode (mode=auto) for tougher sites"),
+        wait_for: z.string().nullish().describe("CSS selector to wait for before extracting. Requires js_render."),
         wait: z
           .number()
           .int()
           .min(0)
           .max(30000)
-          .optional()
+          .nullish()
           .describe("Milliseconds to wait after load. Requires js_render."),
         fallback_autoparse: z
           .boolean()
-          .optional()
+          .nullish()
           .default(true)
           .describe(
             "When mode=auto and the domain is not in Extract open beta (AUTH010), retry once with autoparse (default true)"
@@ -283,7 +295,7 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
       },
     },
     async (params) => {
-      const outcome = await runExtract(apiKey, params, { getClientName });
+      const outcome = await runExtract(apiKey, withoutNulls(params), { getClientName });
       if (!outcome.ok) return err(outcome.errorText);
       return json({
         ok: true,
