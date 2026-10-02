@@ -107,7 +107,13 @@ human does not want to wait for the renewal, relay the way to continue now: add 
 credit pack at https://app.zenrows.com/billing?topup=open (opens the purchase
 directly) or upgrade at https://app.zenrows.com/plans. Prices are per plan; quote them
 only from this tool's response, never from memory.
-AUTH006 is the concurrency limit, which is a different thing entirely.`,
+AUTH006 is the concurrency limit, which is a different thing entirely.
+
+AUTH014 (Batch: api_key_cap_reached) is different from AUTH004: the account still has
+credits, but this API key hit one of its own credit caps. Other keys keep working. The
+response's api_key.caps lists the calling key's caps: window, credits, used_credits,
+remaining_credits, resets_at, and unavailable (usage could not be read). Relay the
+resets_at time, or raise or remove the cap at https://app.zenrows.com/settings/api-keys.`,
       inputSchema: {},
     },
     async () => runAccountUsage(apiKey, opts)

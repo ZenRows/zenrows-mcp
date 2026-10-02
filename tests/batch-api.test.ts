@@ -248,3 +248,46 @@ test("waitForJob raises BATCH_FAILED once the poll deadline passes without a ter
     }
   );
 });
+
+test("waitForJob returns on a failed run instead of polling to the deadline", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(
+      JSON.stringify({
+        job_id: "job-1",
+        latest_run: {
+          status: "failed",
+          failure_reason: "api_key_cap_reached",
+          stats: { total: 2, completed: 1, successful: 1, failed: 0 },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }) as typeof fetch;
+
+  const job = await waitForJob("job-1", { apiKey: "k", fetchImpl, pollTimeoutMs: 2000 });
+  assert.equal(job.latest_run.status, "failed");
+  assert.equal(calls, 1);
+});
+
+test("createJob maps 402 api_key_cap_reached to BATCH_KEY_CAP_REACHED, not out of credits", async () => {
+  const fetchImpl = (async () =>
+    new Response(
+      JSON.stringify({
+        code: "api_key_cap_reached",
+        status: 402,
+        detail: "This API key has reached its daily cap of 200 credits. The cap resets on 2026-10-03 at 00:00 UTC.",
+      }),
+      { status: 402, headers: { "content-type": "application/problem+json" } }
+    )) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [{ url: "https://example.com" }] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) =>
+      e instanceof BatchError &&
+      e.code === "BATCH_KEY_CAP_REACHED" &&
+      /credit caps/.test(e.message) &&
+      !/no credit available/.test(e.message) &&
+      /2026-10-03/.test(e.detail ?? "")
+  );
+});

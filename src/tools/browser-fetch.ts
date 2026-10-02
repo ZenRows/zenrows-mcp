@@ -35,7 +35,15 @@ export async function browserFetch(
   let data: unknown;
   const contentType = response.headers.get("content-type") ?? "";
   const text = await response.text();
-  data = contentType.includes("application/json") && text ? JSON.parse(text) : text;
+  // Errors come back as application/problem+json (e.g. 402 AUTH014), so match any JSON type.
+  data = text;
+  if (text && /[/+]json\b/.test(contentType)) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      // keep the raw text
+    }
+  }
 
   return { ok: response.ok, status: response.status, data };
 }
@@ -43,6 +51,13 @@ export async function browserFetch(
 export function browserError(result: BrowserFetchResult): string {
   if (typeof result.data === "object" && result.data !== null && "error" in result.data) {
     return String((result.data as { error: unknown }).error);
+  }
+  if (typeof result.data === "object" && result.data !== null && "code" in result.data) {
+    const d = result.data as { code: unknown; detail?: unknown; title?: unknown };
+    return `HTTP ${result.status} (${String(d.code)}): ${String(d.detail ?? d.title ?? "")}`.trim();
+  }
+  if (typeof result.data === "string" && result.data.trim()) {
+    return `HTTP ${result.status}: ${result.data.trim().slice(0, 300)}`;
   }
   return `HTTP ${result.status}`;
 }

@@ -54,7 +54,7 @@ export interface ProblemJson {
   invalid_tasks?: Array<{ index: number; reason: string }>;
 }
 
-export const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "stopped", "deleted"]);
+export const TERMINAL_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "stopped", "deleted"]);
 
 export class BatchError extends Error {
   code: string;
@@ -173,6 +173,15 @@ function problemToError(status: number, body: string, method: string, path: stri
       code: "BATCH_QUOTA_EXCEEDED",
       message:
         "Batch quota exceeded (e.g. max concurrent active jobs). Wait for an in-flight job to finish or cancel one, then retry.",
+      status,
+      detail: cause,
+    });
+  }
+  if (status === 402 && serverCode === "api_key_cap_reached") {
+    return new BatchError({
+      code: "BATCH_KEY_CAP_REACHED",
+      message:
+        "This API key reached one of its credit caps, so the Batch API refused the request. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail).",
       status,
       detail: cause,
     });

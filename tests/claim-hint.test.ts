@@ -123,3 +123,21 @@ test("appendClaimHint does not attach on unrelated errors", () => {
   const msg = "Zenrows error 422: RESP001";
   assert.equal(appendClaimHint(msg, { status: 422, body: msg }), msg);
 });
+
+test("a per-key credit cap is not a quota/plan error and gets the cap guidance, not the claim nudge", () => {
+  writeUnclaimed();
+  const fetchBody = JSON.stringify({
+    code: "AUTH014",
+    status: 402,
+    detail: "This API key has reached its daily cap of 200 credits.",
+  });
+  assert.equal(isQuotaOrPlanError({ status: 402, body: fetchBody }), false);
+  const out = appendClaimHint(`Zenrows error 402: ${fetchBody}`, { status: 402, body: fetchBody });
+  assert.match(out, /reached one of its credit caps/);
+  assert.match(out, /settings\/api-keys/);
+  assert.doesNotMatch(out, /Claim your Free account/);
+
+  const batchOut = appendClaimHint("{}", { status: 402, code: "BATCH_KEY_CAP_REACHED" });
+  assert.match(batchOut, /reached one of its credit caps/);
+  assert.doesNotMatch(batchOut, /Claim your Free account/);
+});

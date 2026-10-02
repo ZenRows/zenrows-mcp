@@ -21,6 +21,16 @@ const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
  */
 const SKIP_CODES = new Set(["AUTH006"]);
 
+/**
+ * A per-key credit cap: Fetch, Extract and Browser answer 402 AUTH014, Batch answers
+ * 402 `api_key_cap_reached`. The account still has credits and its other keys still
+ * work, so "buy credits" or "claim your account" would send the user the wrong way.
+ */
+export const KEY_CAP_CODES: ReadonlySet<string> = new Set(["AUTH014", "api_key_cap_reached", "BATCH_KEY_CAP_REACHED"]);
+
+export const KEY_CAP_NUDGE =
+  "This API key reached one of its credit caps. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (the error detail says when).";
+
 function extractCode(body?: string, code?: string): string | undefined {
   if (code && typeof code === "string") return code;
   if (!body) return undefined;
@@ -35,6 +45,18 @@ function extractCode(body?: string, code?: string): string | undefined {
   }
 }
 
+export function isKeyCapError(
+  opts: {
+    body?: string;
+    code?: string;
+    message?: string;
+  } = {}
+): boolean {
+  const code = extractCode(opts.body, opts.code);
+  if (code && KEY_CAP_CODES.has(code)) return true;
+  return /\b(AUTH014|api_key_cap_reached)\b/.test(`${opts.message ?? ""} ${opts.body ?? ""}`);
+}
+
 export function isQuotaOrPlanError(
   opts: {
     status?: number;
@@ -43,6 +65,7 @@ export function isQuotaOrPlanError(
     message?: string;
   } = {}
 ): boolean {
+  if (isKeyCapError(opts)) return false;
   const code = extractCode(opts.body, opts.code);
   if (code && SKIP_CODES.has(code)) return false;
 
@@ -70,6 +93,9 @@ export function appendClaimHint(
     code: opts.code,
     message: opts.message ?? text,
   };
+  if (isKeyCapError(probe)) {
+    return text.includes(KEY_CAP_NUDGE) ? text : `${text}\n\n${KEY_CAP_NUDGE}`;
+  }
   if (!isQuotaOrPlanError(probe)) return text;
 
   const acct = readAccount();
