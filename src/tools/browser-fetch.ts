@@ -44,5 +44,9 @@ export function browserError(result: BrowserFetchResult): string {
   if (typeof result.data === "object" && result.data !== null && "error" in result.data) {
     return String((result.data as { error: unknown }).error);
   }
+  if (typeof result.data === "object" && result.data !== null && "code" in result.data) {
+    const d = result.data as { code: unknown; detail?: unknown; title?: unknown };
+    return `HTTP ${result.status} (${String(d.code)}): ${String(d.detail ?? d.title ?? "")}`.trim();
+  }
   return `HTTP ${result.status}`;
 }

@@ -255,7 +255,8 @@ Download result_url soon — presigned links expire.`,
     "batch_wait",
     {
       annotations: { title: "Wait for Batch Job", readOnlyHint: true, destructiveHint: false },
-      description: "Poll batch_status until the job reaches a terminal state (completed, stopped, or deleted).",
+      description:
+        "Poll batch_status until the job reaches a terminal state (completed, failed, stopped, or deleted). A run that hits an API key credit cap ends as failed with failure_reason api_key_cap_reached.",
       inputSchema: {
         job_id: z.string().describe("Batch job id"),
         timeout_ms: z
