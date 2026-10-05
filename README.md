@@ -144,6 +144,12 @@ See the [full tool reference](https://docs.zenrows.com/mcp/overview#tools) for e
 
 ---
 
+## Paying as an agent
+
+This server authenticates with a Zenrows API key (stdio can auto-signup). An agent with no API key and no human to create one can buy credits itself instead: it reads [agents.zenrows.com/llms.txt](https://agents.zenrows.com/llms.txt), registers a free agent credential, pays over x402, MPP or a card, and calls Fetch and Extract over HTTP. Batch and Browser Sessions still need a zenrows.com account. See [agentic payments](https://docs.zenrows.com/first-steps/agentic-payments) in the docs.
+
+---
+
 ## Development
 
 ```bash
