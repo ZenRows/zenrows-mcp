@@ -18,6 +18,62 @@ const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
   (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
 
+export interface ScrapeParams {
+  url: string;
+  js_render?: boolean | null;
+  premium_proxy?: boolean | null;
+  proxy_country?: string | null;
+  response_type?: "markdown" | "plaintext" | "pdf" | "html" | null;
+  autoparse?: boolean | null;
+  css_extractor?: string | null;
+  wait_for?: string | null;
+  wait?: number | null;
+  js_instructions?: string | null;
+  outputs?: string | null;
+  screenshot?: boolean | null;
+  screenshot_fullpage?: boolean | null;
+  screenshot_selector?: string | null;
+}
+
+/**
+ * Builds the Fetch query string. Uses Adaptive Stealth Mode (mode=auto) unless the
+ * agent or the env forces js_render / premium_proxy, which the API won't combine
+ * with mode=auto. Mirrors the CLI's defaultMode "auto".
+ */
+export function buildScrapeParams(apiKey: string, params: ScrapeParams): URLSearchParams {
+  const searchParams = new URLSearchParams({
+    apikey: apiKey,
+    url: params.url,
+  });
+
+  const isScreenshot = !!(params.screenshot || params.screenshot_fullpage || params.screenshot_selector);
+  const jsRender = !!params.js_render || DEFAULT_JS_RENDER;
+  const premiumProxy = !!params.premium_proxy || DEFAULT_PREMIUM_PROXY;
+
+  if (!jsRender && !premiumProxy) {
+    searchParams.set("mode", "auto");
+  } else {
+    if (jsRender || isScreenshot) searchParams.set("js_render", "true");
+    if (premiumProxy) searchParams.set("premium_proxy", "true");
+  }
+  if (params.proxy_country) searchParams.set("proxy_country", params.proxy_country.toUpperCase());
+  if (params.autoparse) searchParams.set("autoparse", "true");
+  if (params.css_extractor) searchParams.set("css_extractor", params.css_extractor);
+  if (params.wait_for) searchParams.set("wait_for", params.wait_for);
+  if (params.wait != null) searchParams.set("wait", String(params.wait));
+  if (params.js_instructions) searchParams.set("js_instructions", params.js_instructions);
+  if (params.outputs) searchParams.set("outputs", params.outputs);
+  if (isScreenshot) searchParams.set("screenshot", "true");
+  if (params.screenshot_fullpage) searchParams.set("screenshot_fullpage", "true");
+  if (params.screenshot_selector) searchParams.set("screenshot_selector", params.screenshot_selector);
+
+  const effectiveType = params.response_type ?? DEFAULT_RESPONSE_TYPE;
+  if (!params.autoparse && !params.css_extractor && !params.outputs && !isScreenshot && effectiveType !== "html") {
+    searchParams.set("response_type", effectiveType);
+  }
+  return searchParams;
+}
+
 export function createServer(apiKey: string, clientName?: string): McpServer {
   const server = new McpServer({
     name: "zenrows",
@@ -44,35 +100,38 @@ Use for full-page content (markdown/HTML/PDF/screenshot). For structured JSON
 fields (products, articles, listings), prefer the extract tool when it fits —
 it returns parsed fields instead of a full page body.
 
-When to enable options:
-- js_render: page uses React/Vue/Angular, loads content dynamically, or content
-  appears missing on the first attempt
-- premium_proxy: site returns 403/blocked errors even with js_render enabled
-- wait_for: specific content loads after initial render (requires js_render)
+By default the request uses Adaptive Stealth Mode: Zenrows picks JS rendering
+and premium proxies per page, escalates only when the site blocks, and charges
+only for the configuration that succeeds. Pass just the URL for protected,
+dynamic, or blocked pages; do not turn on js_render or premium_proxy to get past
+a block.
+
+Set js_render or premium_proxy only to force a fixed configuration. Doing so
+switches off Adaptive Stealth Mode, and every request is billed at that
+configuration's cost (premium_proxy with js_render is 25x a basic request).
 
 Examples:
-  Basic:    { url: "https://example.com" }
-  Dynamic:  { url: "https://spa.com", js_render: true }
-  Protected:{ url: "https://protected.com", js_render: true, premium_proxy: true }`,
+  Default:  { url: "https://example.com" }
+  Geo:      { url: "https://example.com", proxy_country: "US" }
+  Forced:   { url: "https://spa.com", js_render: true }`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to scrape"),
 
         js_render: z
           .boolean()
           .nullish()
-          .default(false)
           .describe(
-            "Enable JavaScript rendering via headless browser. Required for SPAs " +
-              "(React, Vue, Angular) and pages that load content dynamically."
+            "Force JavaScript rendering on every request. Overrides Adaptive Stealth Mode, " +
+              "which already renders JavaScript when a page needs it. Leave unset unless you need a fixed configuration."
           ),
 
         premium_proxy: z
           .boolean()
           .nullish()
-          .default(false)
           .describe(
-            "Use premium residential proxies to bypass anti-bot protection. " +
-              "Required for heavily protected sites. Implies higher credit cost."
+            "Force premium residential proxies on every request (10x credit cost). Overrides " +
+              "Adaptive Stealth Mode, which already escalates to premium proxies when a site blocks. " +
+              "Leave unset unless you need a fixed configuration."
           ),
 
         proxy_country: z
@@ -80,7 +139,7 @@ Examples:
           .nullish()
           .describe(
             "Country for geo-targeted scraping. ISO 3166-1 alpha-2 code (e.g. 'US', 'GB', 'DE'). " +
-              "Requires premium_proxy=true."
+              "Works in Adaptive Stealth Mode; if you set js_render without premium_proxy, it requires premium_proxy=true."
           ),
 
         response_type: z
@@ -117,7 +176,7 @@ Examples:
           .nullish()
           .describe(
             "CSS selector to wait for before capturing. Use when key content loads " +
-              "after the initial page render. Requires js_render=true."
+              "after the initial page render. Works in Adaptive Stealth Mode or with js_render=true."
           ),
 
         wait: z
@@ -128,14 +187,14 @@ Examples:
           .nullish()
           .describe(
             "Milliseconds to wait after page load before capturing content. " +
-              "Max 30000 (30s). Requires js_render=true."
+              "Max 30000 (30s). Works in Adaptive Stealth Mode or with js_render=true."
           ),
 
         js_instructions: z
           .string()
           .nullish()
           .describe(
-            "JSON array of browser interactions to run before scraping. Requires js_render=true. " +
+            "JSON array of browser interactions to run before scraping. Works in Adaptive Stealth Mode or with js_render=true. " +
               'Example: [{"click":"#load-more"},{"wait":1000},{"wait_for":".results"}]'
           ),
 
@@ -174,39 +233,7 @@ Examples:
       },
     },
     async (params) => {
-      const searchParams = new URLSearchParams({
-        apikey: apiKey,
-        url: params.url,
-      });
-
-      if (
-        params.js_render ||
-        DEFAULT_JS_RENDER ||
-        params.screenshot ||
-        params.screenshot_fullpage ||
-        params.screenshot_selector
-      )
-        searchParams.set("js_render", "true");
-      if (params.premium_proxy || DEFAULT_PREMIUM_PROXY) searchParams.set("premium_proxy", "true");
-      if (params.proxy_country) searchParams.set("proxy_country", params.proxy_country.toUpperCase());
-      if (params.autoparse) searchParams.set("autoparse", "true");
-      if (params.css_extractor) searchParams.set("css_extractor", params.css_extractor);
-      if (params.wait_for) searchParams.set("wait_for", params.wait_for);
-      if (params.wait != null) searchParams.set("wait", String(params.wait));
-      if (params.js_instructions) searchParams.set("js_instructions", params.js_instructions);
-      if (params.outputs) searchParams.set("outputs", params.outputs);
-      if (params.screenshot || params.screenshot_fullpage || params.screenshot_selector)
-        searchParams.set("screenshot", "true");
-      if (params.screenshot_fullpage) searchParams.set("screenshot_fullpage", "true");
-      if (params.screenshot_selector) searchParams.set("screenshot_selector", params.screenshot_selector);
-
-      // response_type is mutually exclusive with autoparse, css_extractor, outputs, and screenshot params.
-      // 'html' is the Zenrows default (no param); all other values are passed through.
-      const isScreenshot = params.screenshot || params.screenshot_fullpage || params.screenshot_selector;
-      const effectiveType = params.response_type ?? DEFAULT_RESPONSE_TYPE;
-      if (!params.autoparse && !params.css_extractor && !params.outputs && !isScreenshot && effectiveType !== "html") {
-        searchParams.set("response_type", effectiveType);
-      }
+      const searchParams = buildScrapeParams(apiKey, params);
 
       let response: Response;
       try {
@@ -328,7 +355,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the Zenrows MCP scrape tool with js_render set to true. The page requires JavaScript execution to load its content. Return the full rendered content in markdown format.`,
+            text: `Scrape ${url} using the Zenrows MCP scrape tool. Pass only the URL: Adaptive Stealth Mode renders JavaScript when the page needs it. Return the full rendered content in markdown format.`,
           },
         },
       ],
