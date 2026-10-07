@@ -58,6 +58,29 @@ function normalizeParams(obj: Record<string, unknown>): Record<string, string> {
   return out;
 }
 
+function isTruthyFlag(v: unknown): boolean {
+  return v === true || v === "true" || v === 1 || v === "1";
+}
+
+/**
+ * Adds mode=auto (Adaptive Stealth Mode) to each task unless the job or the task
+ * forces js_render / premium_proxy, or already sets mode. Applied per task, not per
+ * job: the API rejects a task that combines a job-level mode=auto with its own
+ * js_render or premium_proxy (REQS004). Exported for tests.
+ */
+export function applyAdaptiveStealth(
+  jobParams: Record<string, unknown>,
+  tasks: { zenrows_params?: Record<string, string> }[]
+): void {
+  const forced = (p: Record<string, unknown>) => isTruthyFlag(p.js_render) || isTruthyFlag(p.premium_proxy);
+  if (forced(jobParams) || jobParams.mode != null) return;
+  for (const task of tasks) {
+    const own = task.zenrows_params ?? {};
+    if (forced(own) || own.mode != null) continue;
+    task.zenrows_params = { ...own, mode: "auto" };
+  }
+}
+
 const taskSchema = z.object({
   url: z.string().url().describe("Target URL for this task"),
   external_id: z.string().nullish().describe("Optional stable id echoed back on results"),
@@ -81,6 +104,13 @@ export function registerBatchTools(server: McpServer, apiKey: string): void {
 NOT the same as browser_batch — this hits https://async.api.zenrows.com/v1 with X-API-Key.
 Use for large URL lists; prefer scrape/extract for one-off pages.
 
+Tasks use Adaptive Stealth Mode (mode=auto) by default: Zenrows enables JS
+rendering and premium proxies only on the pages that need them, and charges
+only for the configuration that succeeds. Pass just the URLs for protected or
+dynamic sites. Set js_render or premium_proxy (job-level or in a task's
+zenrows_params) only to force a fixed configuration; that turns Adaptive Stealth
+Mode off for the affected tasks and bills them at that configuration's cost.
+
 Returns job_id + latest_run.status/stats. Poll with batch_status / batch_wait, then batch_results.
 If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
       inputSchema: {
@@ -92,12 +122,30 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
           .array(z.string().url())
           .nullish()
           .describe("Shorthand: list of URLs (converted to tasks). Ignored when tasks is provided."),
-        js_render: z.boolean().nullish().describe("Job-level js_render for all tasks"),
-        premium_proxy: z.boolean().nullish().describe("Job-level premium_proxy for all tasks"),
+        js_render: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Force js_render on all tasks. Overrides Adaptive Stealth Mode, which already renders when needed."
+          ),
+        premium_proxy: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Force premium_proxy on all tasks (10x cost). Overrides Adaptive Stealth Mode, which already escalates when a site blocks."
+          ),
+        mode_auto: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Adaptive Stealth Mode (mode=auto) is on by default; leave unset. False sends plain requests without it."
+          ),
         proxy_country: z
           .string()
           .nullish()
-          .describe("Job-level ISO country code (requires premium_proxy or mode=auto)"),
+          .describe(
+            "Job-level ISO country code. Works in Adaptive Stealth Mode; with js_render alone it requires premium_proxy."
+          ),
         response_type: z.enum(["markdown", "plaintext", "html", "pdf"]).nullish().describe("Job-level response_type"),
         zenrows_params: z
           .record(z.union([z.string(), z.number(), z.boolean()]))
@@ -135,21 +183,24 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
       if (params.proxy_country) jobParams.proxy_country = params.proxy_country.toLowerCase();
       if (params.response_type) jobParams.response_type = params.response_type;
 
+      const tasks = tasksIn.map((t) => {
+        const task: {
+          url: string;
+          external_id?: string;
+          metadata?: unknown;
+          zenrows_params?: Record<string, string>;
+        } = { url: t.url };
+        if (t.external_id) task.external_id = t.external_id;
+        if (t.metadata != null) task.metadata = t.metadata;
+        if (t.zenrows_params) task.zenrows_params = normalizeParams(t.zenrows_params);
+        return task;
+      });
+      if (params.mode_auto !== false) applyAdaptiveStealth(jobParams, tasks);
+
       const body = {
         type: "regular" as const,
         status: "closed" as const,
-        tasks: tasksIn.map((t) => {
-          const task: {
-            url: string;
-            external_id?: string;
-            metadata?: unknown;
-            zenrows_params?: Record<string, string>;
-          } = { url: t.url };
-          if (t.external_id) task.external_id = t.external_id;
-          if (t.metadata != null) task.metadata = t.metadata;
-          if (t.zenrows_params) task.zenrows_params = normalizeParams(t.zenrows_params);
-          return task;
-        }),
+        tasks,
         ...(Object.keys(jobParams).length ? { zenrows_params: normalizeParams(jobParams) } : {}),
       };
 

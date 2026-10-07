@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import { buildExtractParams, registerExtractTool, runExtract, zrErrorCode } from "../src/tools/extract.ts";
+import { buildExtractParams, isEmptyData, registerExtractTool, runExtract, zrErrorCode } from "../src/tools/extract.ts";
 
 /** Minimal stand-in for McpServer#registerTool — captures the handler so we can call it directly. */
 function fakeServer() {
@@ -172,14 +172,13 @@ test("buildExtractParams omits css_extractor for mode css when it's missing", ()
 
 test("buildExtractParams wires every stealth option, uppercasing proxy_country", () => {
   const sp = buildExtractParams("k", "https://example.com", "auto", {
-    mode_auto: true,
     js_render: true,
     premium_proxy: true,
     proxy_country: "us",
     wait_for: ".content",
     wait: 2500,
   });
-  assert.equal(sp.get("mode"), "auto");
+  assert.equal(sp.get("mode"), null, "forced flags turn Adaptive Stealth Mode off");
   assert.equal(sp.get("js_render"), "true");
   assert.equal(sp.get("premium_proxy"), "true");
   assert.equal(sp.get("proxy_country"), "US");
@@ -196,6 +195,73 @@ test("buildExtractParams leaves falsy/undefined stealth options unset", () => {
   assert.equal(sp.get("js_render"), null);
   assert.equal(sp.get("premium_proxy"), null);
   assert.equal(sp.get("wait"), null);
+  assert.equal(sp.get("mode"), "auto");
+});
+
+test("buildExtractParams defaults to Adaptive Stealth Mode in every mode", () => {
+  for (const mode of ["auto", "autoparse", "css"] as const) {
+    const sp = buildExtractParams("k", "https://example.com", mode, { css_extractor: '{"t":"h1"}' });
+    assert.equal(sp.get("mode"), "auto", mode);
+  }
+});
+
+test("buildExtractParams keeps proxy_country alongside Adaptive Stealth Mode", () => {
+  const sp = buildExtractParams("k", "https://example.com", "auto", { proxy_country: "de" });
+  assert.equal(sp.get("mode"), "auto");
+  assert.equal(sp.get("proxy_country"), "DE");
+});
+
+test("buildExtractParams: mode_auto=false opts out of Adaptive Stealth Mode", () => {
+  const sp = buildExtractParams("k", "https://example.com", "auto", { mode_auto: false });
+  assert.equal(sp.get("mode"), null);
+});
+
+test("buildExtractParams: premium_proxy alone overrides Adaptive Stealth Mode", () => {
+  const sp = buildExtractParams("k", "https://example.com", "auto", { premium_proxy: true, mode_auto: true });
+  assert.equal(sp.get("mode"), null);
+  assert.equal(sp.get("premium_proxy"), "true");
+});
+
+test("runExtract falls back to autoparse on REQS007 (domain not prepared)", async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("extract=auto")) {
+      return new Response(JSON.stringify({ code: "REQS007", detail: "Extract has not been prepared" }), {
+        status: 403,
+      });
+    }
+    return new Response(JSON.stringify({ title: "fallback" }), { status: 200 });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(outcome.fellBackToAutoparse, true);
+  assert.equal(outcome.mode, "autoparse");
+  assert.equal(calls.length, 2);
+  assert.match(calls[1]!, /autoparse=true/);
+  assert.match(calls[1]!, /mode=auto/);
+});
+
+test("runExtract does not fall back on other 403s", async () => {
+  let n = 0;
+  const fetchImpl = (async () => {
+    n++;
+    return new Response(JSON.stringify({ code: "REQS001", detail: "blocked by policy" }), { status: 403 });
+  }) as typeof fetch;
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  assert.equal(n, 1);
+});
+
+test("isEmptyData treats an object of empty fields as empty", () => {
+  assert.equal(isEmptyData({ listings: [] }), true);
+  assert.equal(isEmptyData({ title: "", items: [], meta: {} }), true);
+  assert.equal(isEmptyData({ listings: [], total: 0 }), false);
+  assert.equal(isEmptyData({ title: "x" }), false);
+  assert.equal(isEmptyData({ flag: false }), false);
 });
 
 test("buildExtractParams keeps wait=0 (a valid explicit value, not falsy-omitted)", () => {
