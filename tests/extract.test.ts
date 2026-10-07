@@ -245,6 +245,36 @@ test("runExtract falls back to autoparse on REQS007 (domain not prepared)", asyn
   assert.match(calls[1]!, /mode=auto/);
 });
 
+test("runExtract does not fall back on REQS007 when fallback_autoparse is false", async () => {
+  let n = 0;
+  const fetchImpl = (async () => {
+    n++;
+    return new Response(JSON.stringify({ code: "REQS007", detail: "not prepared" }), { status: 403 });
+  }) as typeof fetch;
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: false }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.match(outcome.errorText, /REQS007/);
+  assert.equal(n, 1);
+});
+
+test("runExtract only falls back from mode=auto, not from autoparse or css", async () => {
+  for (const mode of ["autoparse", "css"] as const) {
+    let n = 0;
+    const fetchImpl = (async () => {
+      n++;
+      return new Response(JSON.stringify({ code: "REQS007" }), { status: 403 });
+    }) as typeof fetch;
+    const outcome = await runExtract(
+      "testkey",
+      { url: "https://example.com", mode, css_extractor: '{"t":"h1"}' },
+      { fetchImpl }
+    );
+    assert.equal(outcome.ok, false, mode);
+    assert.equal(n, 1, mode);
+  }
+});
+
 test("runExtract does not fall back on other 403s", async () => {
   let n = 0;
   const fetchImpl = (async () => {
