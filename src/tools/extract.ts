@@ -307,7 +307,7 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .string()
           .nullish()
           .describe(
-            "ISO 3166-1 alpha-2 country code. Works in Adaptive Stealth Mode; with js_render alone it requires premium_proxy."
+            "ISO 3166-1 alpha-2 country code. Works in Adaptive Stealth Mode; with js_render or mode_auto=false it requires premium_proxy."
           ),
         mode_auto: z
           .boolean()
@@ -318,14 +318,18 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
         wait_for: z
           .string()
           .nullish()
-          .describe("CSS selector to wait for before extracting. Works in Adaptive Stealth Mode or with js_render."),
+          .describe(
+            "CSS selector to wait for before extracting. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+          ),
         wait: z
           .number()
           .int()
           .min(0)
           .max(30000)
           .nullish()
-          .describe("Milliseconds to wait after load. Works in Adaptive Stealth Mode or with js_render."),
+          .describe(
+            "Milliseconds to wait after load. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+          ),
         fallback_autoparse: z
           .boolean()
           .nullish()
