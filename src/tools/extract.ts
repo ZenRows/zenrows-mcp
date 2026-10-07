@@ -319,7 +319,7 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .string()
           .nullish()
           .describe(
-            "CSS selector to wait for before extracting. Requires js_render=true; Adaptive Stealth Mode alone ignores it."
+            "CSS selector to wait for before extracting. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
           ),
         wait: z
           .number()
@@ -328,7 +328,7 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .max(30000)
           .nullish()
           .describe(
-            "Milliseconds to wait after load. Requires js_render=true; Adaptive Stealth Mode alone ignores it."
+            "Milliseconds to wait after load. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
           ),
         fallback_autoparse: z
           .boolean()

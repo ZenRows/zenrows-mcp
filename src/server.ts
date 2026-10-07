@@ -176,7 +176,7 @@ Examples:
           .nullish()
           .describe(
             "CSS selector to wait for before capturing. Use when key content loads " +
-              "after the initial page render. Requires js_render=true; Adaptive Stealth Mode alone ignores it."
+              "after the initial page render. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
           ),
 
         wait: z
@@ -187,7 +187,7 @@ Examples:
           .nullish()
           .describe(
             "Milliseconds to wait after page load before capturing content. " +
-              "Max 30000 (30s). Requires js_render=true; Adaptive Stealth Mode alone ignores it."
+              "Max 30000 (30s). Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
           ),
 
         js_instructions: z
