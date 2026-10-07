@@ -32,12 +32,23 @@ export function zrErrorCode(body: string): string | undefined {
   }
 }
 
-function isEmptyData(data: unknown): boolean {
+/**
+ * True when the result carries no usable value: null, "", [], {}, or an object whose
+ * every field is itself empty (e.g. `{ listings: [] }` from a page that didn't load).
+ */
+export function isEmptyData(data: unknown): boolean {
   if (data === null || data === undefined) return true;
   if (Array.isArray(data)) return data.length === 0;
-  if (typeof data === "object") return Object.keys(data as object).length === 0;
+  if (typeof data === "object") return Object.values(data as object).every(isEmptyData);
   if (typeof data === "string") return data.trim() === "";
   return false;
+}
+
+/** Errors on extract=auto that the autoparse fallback can recover from. */
+function isExtractUnavailable(status: number, body: string): boolean {
+  const code = zrErrorCode(body);
+  // AUTH010: domain not in the Extract open beta. REQS007: domain not prepared yet.
+  return (status === 402 && code === "AUTH010") || (status === 403 && code === "REQS007");
 }
 
 export type ExtractMode = "auto" | "autoparse" | "css";
@@ -83,9 +94,15 @@ export function buildExtractParams(
   if (mode === "auto") sp.set("extract", "auto");
   if (mode === "autoparse") sp.set("autoparse", "true");
   if (mode === "css" && opts.css_extractor) sp.set("css_extractor", opts.css_extractor);
-  if (opts.mode_auto) sp.set("mode", "auto");
-  if (opts.js_render) sp.set("js_render", "true");
-  if (opts.premium_proxy) sp.set("premium_proxy", "true");
+  // Adaptive Stealth Mode unless the caller forces js_render / premium_proxy (the API
+  // won't combine them with mode=auto) or opts out with mode_auto=false. Same default
+  // as scrape and the CLI.
+  if (opts.js_render || opts.premium_proxy) {
+    if (opts.js_render) sp.set("js_render", "true");
+    if (opts.premium_proxy) sp.set("premium_proxy", "true");
+  } else if (opts.mode_auto !== false) {
+    sp.set("mode", "auto");
+  }
   if (opts.proxy_country) sp.set("proxy_country", opts.proxy_country.toUpperCase());
   if (opts.wait_for) sp.set("wait_for", opts.wait_for);
   if (opts.wait != null) sp.set("wait", String(opts.wait));
@@ -118,8 +135,8 @@ async function callZenrows(
 }
 
 /**
- * Core extract logic (testable). AUTH010 on mode=auto retries once with autoparse
- * unless fallback_autoparse is false — same behavior as the CLI extract adapter.
+ * Core extract logic (testable). When extract=auto isn't available for the domain
+ * (AUTH010 or REQS007), retries once with autoparse unless fallback_autoparse is false.
  */
 export async function runExtract(
   apiKey: string,
@@ -161,8 +178,7 @@ export async function runExtract(
     !result.ok &&
     mode === "auto" &&
     params.fallback_autoparse !== false &&
-    result.status === 402 &&
-    zrErrorCode(result.body) === "AUTH010"
+    isExtractUnavailable(result.status, result.body)
   ) {
     usedMode = "autoparse";
     fellBackToAutoparse = true;
@@ -250,11 +266,18 @@ Prefer this over scrape when you need JSON fields (products, articles, listings)
 rather than a full page body.
 Modes:
 - auto (default): extract=auto — site-tailored Extract (open beta; currently free,
-  billing may apply later; may fall back to autoparse if the domain is not enabled)
+  billing may apply later; falls back to autoparse when the domain isn't enabled
+  or prepared for Extract yet)
 - autoparse: general-purpose structured JSON on any domain
 - css: css_extractor with an explicit selector map
 
-Stealth: js_render, premium_proxy, proxy_country, or mode_auto (Adaptive Stealth Mode).
+Requests use Adaptive Stealth Mode by default: Zenrows enables JS rendering and
+premium proxies only when the site needs them, and charges only for the
+configuration that succeeds. Pass just the URL for protected or dynamic pages.
+Set js_render or premium_proxy only to force a fixed configuration; that turns
+Adaptive Stealth Mode off and bills every request at that configuration's cost.
+
+Check "empty" in the result: true means no field came back with a value.
 For full-page markdown/HTML/screenshots, use scrape instead.`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to extract from"),
@@ -267,30 +290,48 @@ For full-page markdown/HTML/screenshots, use scrape instead.`,
           .string()
           .nullish()
           .describe('Required when mode=css. JSON map of field→selector, e.g. \'{"title":"h1","price":".price"}\''),
-        js_render: z.boolean().nullish().describe("Enable headless JS rendering (SPAs / dynamic content)"),
+        js_render: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Force JS rendering on every request. Overrides Adaptive Stealth Mode, which already renders when needed."
+          ),
         premium_proxy: z
           .boolean()
           .nullish()
-          .describe("Use premium residential proxies (anti-bot). Higher credit cost."),
+          .describe(
+            "Force premium residential proxies on every request (10x cost). Overrides Adaptive Stealth Mode, " +
+              "which already escalates to premium proxies when a site blocks."
+          ),
         proxy_country: z
           .string()
           .nullish()
-          .describe("ISO 3166-1 alpha-2 country code. Requires premium_proxy or mode_auto."),
-        mode_auto: z.boolean().nullish().describe("Enable Adaptive Stealth Mode (mode=auto) for tougher sites"),
-        wait_for: z.string().nullish().describe("CSS selector to wait for before extracting. Requires js_render."),
+          .describe(
+            "ISO 3166-1 alpha-2 country code. Works in Adaptive Stealth Mode; with js_render alone it requires premium_proxy."
+          ),
+        mode_auto: z
+          .boolean()
+          .nullish()
+          .describe(
+            "Adaptive Stealth Mode (mode=auto) is on by default; leave unset. False sends a plain request without it."
+          ),
+        wait_for: z
+          .string()
+          .nullish()
+          .describe("CSS selector to wait for before extracting. Works in Adaptive Stealth Mode or with js_render."),
         wait: z
           .number()
           .int()
           .min(0)
           .max(30000)
           .nullish()
-          .describe("Milliseconds to wait after load. Requires js_render."),
+          .describe("Milliseconds to wait after load. Works in Adaptive Stealth Mode or with js_render."),
         fallback_autoparse: z
           .boolean()
           .nullish()
           .default(true)
           .describe(
-            "When mode=auto and the domain is not in Extract open beta (AUTH010), retry once with autoparse (default true)"
+            "When mode=auto and the domain isn't enabled (AUTH010) or prepared (REQS007) for Extract, retry once with autoparse (default true)"
           ),
       },
     },

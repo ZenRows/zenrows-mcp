@@ -23,12 +23,12 @@ startCommand:
       js_render:
         type: boolean
         title: JavaScript Rendering
-        description: Enable JavaScript rendering by default for all scrape requests. Useful for SPAs and dynamic pages.
+        description: Force JavaScript rendering on every scrape request. Leave off to keep Adaptive Stealth Mode, which already renders when a page needs it.
         default: false
       premium_proxy:
         type: boolean
         title: Premium Proxy
-        description: Use premium residential proxies by default. Bypasses advanced anti-bot protection.
+        description: Force premium residential proxies on every scrape request (10x cost). Leave off to keep Adaptive Stealth Mode, which already escalates when a site blocks.
         default: false
       response_type:
         type: string
