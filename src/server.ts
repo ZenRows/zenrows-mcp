@@ -176,7 +176,7 @@ Examples:
           .nullish()
           .describe(
             "CSS selector to wait for before capturing. Use when key content loads " +
-              "after the initial page render. Works in Adaptive Stealth Mode or with js_render=true."
+              "after the initial page render. Requires js_render=true; Adaptive Stealth Mode alone ignores it."
           ),
 
         wait: z
@@ -187,14 +187,15 @@ Examples:
           .nullish()
           .describe(
             "Milliseconds to wait after page load before capturing content. " +
-              "Max 30000 (30s). Works in Adaptive Stealth Mode or with js_render=true."
+              "Max 30000 (30s). Requires js_render=true; Adaptive Stealth Mode alone ignores it."
           ),
 
         js_instructions: z
           .string()
           .nullish()
           .describe(
-            "JSON array of browser interactions to run before scraping. Works in Adaptive Stealth Mode or with js_render=true. " +
+            "JSON array of browser interactions to run before scraping. Works in Adaptive Stealth Mode (the page is then " +
+              "rendered and billed at the JS rendering rate) or with js_render=true. " +
               'Example: [{"click":"#load-more"},{"wait":1000},{"wait_for":".results"}]'
           ),
 
@@ -277,8 +278,8 @@ Examples:
         const mimeType = isPng
           ? "image/png"
           : isJpeg
-          ? "image/jpeg"
-          : (contentType.split(";")[0].trim() as "image/png" | "image/jpeg");
+            ? "image/jpeg"
+            : (contentType.split(";")[0].trim() as "image/png" | "image/jpeg");
         const base64 = Buffer.from(buffer).toString("base64");
         return {
           content: [{ type: "image" as const, data: base64, mimeType }],
