@@ -57,7 +57,7 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
     assert.ok(tools.includes(name), `${name} is listed`);
   }
 
-  // Create and wait. The account shares 3 active crawl + Batch slots, so wait out a 429.
+  // Create and wait. Other crawls on the account may be running, so wait out a 429.
   const deadline = Date.now() + SLOT_WAIT_MS;
   let created: Record<string, unknown>;
   for (;;) {

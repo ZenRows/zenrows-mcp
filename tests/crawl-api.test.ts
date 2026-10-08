@@ -157,7 +157,7 @@ test("401 and 402 map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED and CRAWL_KEY_CAP_RE
   assert.equal(await codeOf(respond(401)), "AUTH_INVALID");
   assert.equal(await codeOf(respond(402, "AUTH002")), "CRAWL_QUOTA_EXCEEDED");
   assert.equal(await codeOf(respond(402, "AUTH014")), "CRAWL_KEY_CAP_REACHED");
-  assert.equal(await codeOf(respond(500, "internal_error")), "CRAWL_FAILED");
+  assert.equal(await codeOf(respond(500)), "CRAWL_FAILED");
 });
 
 test("a network failure becomes BACKEND_UNAVAILABLE", async () => {
