@@ -2,9 +2,8 @@
  * Client for the Zenrows Crawl API (https://api.zenrows.com/v1/crawls).
  * Auth via X-API-Key header. Errors are application/problem+json (RFC 9457).
  *
- * Crawl is in beta. This client supports link discovery with URL-only or HTML
- * output: no `discovery` input, and `output_format` is `html` or absent. JSON output
- * and pagination discovery are not exposed.
+ * A crawl follows the links on each page up to `depth` and stays on the start URL's
+ * domain. `output_format` is `html` (each kept URL's page is stored) or absent (URLs only).
  */
 
 export const DEFAULT_CRAWL_API_BASE = "https://api.zenrows.com/v1";
@@ -67,7 +66,7 @@ export interface CrawlStop {
   [k: string]: unknown;
 }
 
-/** Create body. Only the fields Crawl basic takes; unset fields are not sent. */
+/** Create body. Unset fields are not sent. */
 export interface CreateCrawlBody {
   url: string;
   depth: number;

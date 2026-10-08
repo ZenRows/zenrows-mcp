@@ -87,7 +87,7 @@ export function registerCrawlTools(server: McpServer, apiKey: string): void {
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false },
-      description: `Start a crawl from one URL (Zenrows Crawl API, beta). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's domain.
+      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's domain.
 
 ${WHEN_TO_USE}
 

@@ -29,7 +29,6 @@ const crawl = (status = "running", extra: Record<string, unknown> = {}) => ({
   depth: 1,
   max_items: 10,
   max_pages: 10,
-  discovery: ["links"],
   coverage: { pages_fetched: 0, pages_failed: 0, items_found: 0 },
   created_at: "2026-10-08T00:00:00Z",
   ...extra,
@@ -78,7 +77,7 @@ test("403 REQS008 maps to CRAWL_NOT_ENABLED with a message saying Crawl is not e
       {
         code: "REQS008",
         title: "Crawl is not enabled for this account.",
-        detail: "Crawl is in private beta. Contact support to request access.",
+        detail: "Crawl is not enabled for this account.",
         status: 403,
       },
       403

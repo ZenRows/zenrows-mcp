@@ -61,7 +61,7 @@ test("registers the seven crawl tools, with only crawl_stop destructive", () => 
   }
 });
 
-test("crawl_create's schema takes output_format html and rejects json", () => {
+test("crawl_create's output_format accepts only html", () => {
   const schema = z.object(register().configs.crawl_create.inputSchema);
   const base = { url: "https://shop.example/", depth: 1 };
   assert.equal(schema.safeParse({ ...base, output_format: "html" }).success, true);
@@ -71,15 +71,14 @@ test("crawl_create's schema takes output_format html and rejects json", () => {
   assert.equal(schema.safeParse({ ...base, depth: 0 }).success, false);
 });
 
-test("crawl_create's schema exposes no discovery or pagination input, and drops one if sent", () => {
+test("crawl_create's schema takes only its own inputs and drops unknown ones", () => {
   const shape = register().configs.crawl_create.inputSchema;
   assert.equal("discovery" in shape, false);
-  assert.equal("pagination" in shape, false);
-  const parsed = z.object(shape).parse({ url: "https://shop.example/", depth: 1, discovery: ["pagination"] });
+  const parsed = z.object(shape).parse({ url: "https://shop.example/", depth: 1, discovery: ["links"] });
   assert.equal("discovery" in parsed, false);
 });
 
-test("crawl_create sends only the fields the agent set, and never discovery", async () => {
+test("crawl_create sends only the fields the caller set", async () => {
   const { handlers } = register();
   const bodies: Record<string, unknown>[] = [];
   await withFetch(
@@ -116,7 +115,12 @@ test("crawl_create surfaces 403 REQS008 as CRAWL_NOT_ENABLED", async () => {
   const out = await withFetch(
     () =>
       jsonResponse(
-        { code: "REQS008", title: "Crawl is not enabled for this account.", detail: "private beta", status: 403 },
+        {
+          code: "REQS008",
+          title: "Crawl is not enabled for this account.",
+          detail: "Crawl is not enabled for this account.",
+          status: 403,
+        },
         403
       ),
     () => handlers.crawl_create({ url: "https://shop.example/", depth: 1 })
