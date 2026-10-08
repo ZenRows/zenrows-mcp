@@ -85,7 +85,7 @@ export function createServer(apiKey: string, clientName?: string): McpServer {
   // fall back to MCP handshake (stdio/persistent connection path).
   const getClientName = () => clientName ?? server.server.getClientVersion()?.name;
 
-  // ─── scrape ──────────────────────────────────────────────────────────────────────────────
+  // ─── scrape ────────────────────────────────────────────────────────────────
 
   server.registerTool(
     "scrape",
@@ -293,7 +293,7 @@ Examples:
     }
   );
 
-  // ─── prompts ───────────────────────────────────────────────────────────────────────────
+  // ─── prompts ───────────────────────────────────────────────────────────────
 
   server.registerPrompt(
     "scrape_and_summarize",
