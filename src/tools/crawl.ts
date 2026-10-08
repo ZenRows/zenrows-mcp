@@ -70,12 +70,8 @@ function withContentId(row: CrawlResult): CrawlResult & { content_id?: string } 
   return parsed ? { ...row, content_id: parsed.contentId } : row;
 }
 
-const WHEN_TO_USE = `Crawl vs Batch vs scrape:
-- crawl_*: you have ONE start URL (a listing, category, blog index) and want the
-  URLs behind it discovered for you, optionally with each page's HTML. Crawl
-  follows links in the page HTML and stays on the start URL's domain.
-- batch_*: you already have the list of URLs to fetch.
-- scrape / extract: one page, answered right away.`;
+const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
+the URLs behind it, optionally with each page's HTML. For a single page, use scrape.`;
 
 const crawlIdSchema = z.string().describe("Crawl id returned by crawl_create (c_…)");
 
@@ -99,7 +95,7 @@ then read it with crawl_content.
 Returns the crawl (crawl_id, status, coverage). The crawl runs asynchronously: pass
 wait=true, or call crawl_wait / crawl_status, then crawl_results.
 CRAWL_NOT_ENABLED: Crawl is not enabled for this account; do not retry.
-CRAWL_TOO_MANY_CRAWLS: the account's 3 active crawls + Batch jobs are in use; retry after retry_after seconds.`,
+CRAWL_TOO_MANY_CRAWLS: the account has too many crawls running; retry after retry_after seconds.`,
       inputSchema: {
         url: z.string().url().describe("Start URL: a public http(s) page, such as a listing or category page"),
         depth: z
@@ -245,7 +241,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
 
 Pass content_url from crawl_results, or crawl_id + content_id. Returns raw HTML,
 cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
-markdown or structured version of a page, use scrape or extract on its URL instead.`,
+markdown version of a page, use scrape on its URL instead.`,
       inputSchema: {
         content_url: z
           .string()

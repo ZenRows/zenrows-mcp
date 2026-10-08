@@ -170,7 +170,7 @@ export ZENROWS_CRAWL_API_BASE=https://api.zenrows.com/v1
 npm run test:e2e
 ```
 
-The crawl is billed to the key's account (at most 5 page fetches), and it takes one of the account's active crawl and Batch job slots while it runs; when all are busy the test waits and retries for up to 5 minutes.
+The crawl is billed to the key's account (at most 5 page fetches), and it counts against the account's running crawls; when the account has too many crawls running, the test waits and retries for up to 5 minutes.
 
 Pull requests and issues are welcome.
 

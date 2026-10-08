@@ -200,7 +200,7 @@ export function problemToError(
     return new CrawlError({
       code: "CRAWL_NOT_ENABLED",
       message:
-        "Crawl is not enabled for this account. Do not retry. Ask the user to request Crawl access from Zenrows; meanwhile, use batch_create with a known URL list, or scrape page by page.",
+        "Crawl is not enabled for this account. Do not retry. Ask the user to request Crawl access from Zenrows; meanwhile, scrape the pages one by one.",
       status,
       detail: cause,
     });
@@ -237,7 +237,7 @@ export function problemToError(
     return new CrawlError({
       code: "CRAWL_TOO_MANY_CRAWLS",
       message:
-        "This account already runs as many crawls and Batch jobs as it may at once (3 by default, shared with Batch). Wait for one to finish, or stop one with crawl_stop / batch_cancel, then retry.",
+        "This account has too many crawls running. Wait for one to finish, or stop one with crawl_stop, then retry after retry_after seconds.",
       status,
       detail: cause,
       retryAfter: Number.isFinite(seconds) && seconds > 0 ? seconds : undefined,
