@@ -96,7 +96,7 @@ export function registerCrawlTools(server: McpServer, apiKey: string): void {
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false },
-      description: `Beta: Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
+      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
 
 ${WHEN_TO_USE}
 
@@ -175,7 +175,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
     "crawl_get",
     {
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false },
-      description: `Beta: Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
+      description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
 completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {
@@ -202,7 +202,7 @@ completed with stop_reason max_items / max_pages means a limit ended it; failed 
     "crawl_results",
     {
       annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false },
-      description: `Beta: List the URLs a crawl kept, in the order it kept them, following the API's pages up to limit.
+      description: `List the URLs a crawl kept, in the order it kept them, following the API's pages up to limit.
 
 Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url: pass it to crawl_content as content.
 
@@ -243,7 +243,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
     "crawl_content",
     {
       annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false },
-      description: `Beta: Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
+      description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
 
 Pass crawl_id and content: a content id, or content_url from a crawl_results row. Returns raw HTML,
 cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
@@ -290,7 +290,7 @@ markdown version of a page, use scrape on its URL instead.`,
     {
       annotations: { title: "List Crawls", readOnlyHint: true, destructiveHint: false },
       description:
-        "Beta: List this account's crawls, newest first, with status and coverage (no results). Pass next_cursor as cursor for the next page; next_cursor is absent on the last page.",
+        "List this account's crawls, newest first, with status and coverage (no results). Pass next_cursor as cursor for the next page; next_cursor is absent on the last page.",
       inputSchema: {
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_list call"),
         limit: z.number().int().min(1).max(100).nullish().describe("Crawls per page (default 20, max 100)"),
@@ -311,7 +311,7 @@ markdown version of a page, use scrape on its URL instead.`,
     "crawl_stop",
     {
       annotations: { title: "Stop Crawl", readOnlyHint: false, destructiveHint: true, idempotentHint: true },
-      description: `Beta: Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
+      description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
 Idempotent: a crawl that already ended answers with its final status. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
       inputSchema: { crawl_id: crawlIdSchema },
@@ -330,7 +330,7 @@ Idempotent: a crawl that already ended answers with its final status. Pages in f
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false },
       description:
-        "Beta: Poll a crawl until it ends (completed, stopped, or failed) and return its status and coverage. If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.",
+        "Poll a crawl until it ends (completed, stopped, or failed) and return its status and coverage. If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.",
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z

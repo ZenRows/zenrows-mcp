@@ -49,7 +49,7 @@ const crawl = (status = "running") => ({
   created_at: "2026-10-08T00:00:00Z",
 });
 
-test("registers the seven crawl tools as Beta, with only crawl_stop destructive and idempotent", () => {
+test("registers the seven crawl tools, with only crawl_stop destructive and idempotent", () => {
   const { configs } = register();
   assert.deepEqual(Object.keys(configs).sort(), [
     "crawl_content",
@@ -63,7 +63,6 @@ test("registers the seven crawl tools as Beta, with only crawl_stop destructive 
   for (const [name, c] of Object.entries(configs)) {
     assert.equal(c.annotations.destructiveHint, name === "crawl_stop", name);
     assert.equal(c.annotations.readOnlyHint, !["crawl_create", "crawl_stop"].includes(name), name);
-    assert.ok(c.description.startsWith("Beta: "), name);
   }
   assert.equal(configs.crawl_stop.annotations.idempotentHint, true);
 });
