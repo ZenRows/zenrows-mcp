@@ -72,7 +72,6 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
       max_pages: 5,
       ...(include ? { include_patterns: [include] } : {}),
       output_format: "html",
-      follow: true,
     });
     const b = body(out);
     if (out.isError && b.code === "CRAWL_TOO_MANY_CRAWLS" && Date.now() < deadline) {
@@ -86,9 +85,10 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
     break;
   }
   const crawlId = created.crawl_id as string;
+  console.log(`crawl_create: ${created.status}`);
   // The wait stays under the MCP client timeout, so a slow crawl comes back running.
   while (created.status === "running") created = body(await call("crawl_wait", { crawl_id: crawlId }));
-  console.log(`crawl_create: ${created.status}`);
+  console.log(`crawl_wait: ${created.status}`);
   assert.equal(created.status, "completed");
 
   const results = await call("crawl_results", { crawl_id: crawlId });
@@ -107,7 +107,7 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
 
   const fetched = r.results.find((row) => row.content_status === "fetched");
   assert.ok(fetched?.content_url, "a fetched result with content_url");
-  const content = await call("crawl_content", { content_url: fetched.content_url });
+  const content = await call("crawl_content", { crawl_id: crawlId, content: fetched.content_url });
   assert.ok(!content.isError, content.content[0].text);
   const html = content.content[0].text;
   console.log(`crawl_content: ${html.length} chars of HTML`);
