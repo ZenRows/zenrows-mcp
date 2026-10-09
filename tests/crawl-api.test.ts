@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import {
   CrawlError,
+  contentIdOf,
   crawlBase,
   createCrawl,
   getCrawl,
   getCrawlContent,
   listCrawls,
-  parseContentUrl,
   readResults,
   stopCrawl,
   waitForCrawl,
@@ -166,7 +166,7 @@ test("401, 409, 402 and other 403s map to AUTH_INVALID, CRAWL_REQUEST_IN_FLIGHT,
 });
 
 test("an error without a server code carries no server_code", async () => {
-  const fetchImpl = (async () => new Response("bad gateway", { status: 502 })) as typeof fetch;
+  const fetchImpl = (async () => new Response("internal error", { status: 500 })) as typeof fetch;
   await assert.rejects(
     () => listCrawls({ apiKey: "k", fetchImpl }),
     (e: unknown) => {
@@ -193,7 +193,7 @@ test("a network failure becomes BACKEND_UNAVAILABLE", async () => {
     throw new TypeError("fetch failed: ECONNREFUSED");
   }) as typeof fetch;
   await assert.rejects(
-    () => listCrawls({ apiKey: "k", fetchImpl }),
+    () => stopCrawl("c_1", { apiKey: "k", fetchImpl }),
     (e: unknown) => e instanceof CrawlError && e.code === "BACKEND_UNAVAILABLE" && /ECONNREFUSED/.test(e.message)
   );
 });
@@ -208,13 +208,11 @@ test("getCrawlContent returns the HTML body as text", async () => {
   assert.match(page.contentType, /text\/html/);
 });
 
-test("parseContentUrl reads both ids from a content_url", () => {
-  assert.deepEqual(parseContentUrl("/v1/crawls/c_1/contents/ct_2"), { crawlId: "c_1", contentId: "ct_2" });
-  assert.deepEqual(parseContentUrl("https://api.zenrows.com/v1/crawls/c_1/contents/ct_2?download=true"), {
-    crawlId: "c_1",
-    contentId: "ct_2",
-  });
-  assert.equal(parseContentUrl("/v1/crawls/c_1"), undefined);
+test("contentIdOf takes a content id as given, or a content_url's last path segment", () => {
+  assert.equal(contentIdOf("ct_2"), "ct_2");
+  assert.equal(contentIdOf("/v1/crawls/c_1/contents/ct_2"), "ct_2");
+  assert.equal(contentIdOf("https://api.zenrows.com/v1/crawls/c_1/contents/ct_2/?download=true"), "ct_2");
+  assert.equal(contentIdOf("/"), "");
 });
 
 test("readResults follows next_cursor and stops when it is null", async () => {
@@ -315,4 +313,112 @@ test("crawlBase trims trailing slashes and defaults when the env override is uns
     if (original === undefined) delete process.env.ZENROWS_CRAWL_API_BASE;
     else process.env.ZENROWS_CRAWL_API_BASE = original;
   }
+});
+
+const createBody = { url: "https://example.com/", depth: 1 };
+
+/** Answers each request with the next status in turn, 200 with a crawl once they run out. */
+function sequence(statuses: number[], headers: Record<string, string> = {}) {
+  const calls: string[] = [];
+  const fetchImpl = (async (_i: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(String(init?.method));
+    const status = statuses.shift();
+    return status === undefined
+      ? jsonResponse({ ...crawl(), results: [], next_cursor: "x" })
+      : jsonResponse({ code: "x", title: "x", status }, status, headers);
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+const flush = async () => {
+  for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+};
+
+/** Runs a call under fake timers, ticking through every backoff until it settles. */
+async function settle<T>(t: TestContext, p: Promise<T>): Promise<T> {
+  let done = false;
+  p.then(
+    () => (done = true),
+    () => (done = true)
+  );
+  while (!done) {
+    await flush();
+    t.mock.timers.tick(10_000);
+  }
+  return p;
+}
+
+test("a GET is retried on 503 and then succeeds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = sequence([503, 503]);
+  const out = await settle(t, getCrawl("c_1", { apiKey: "k", fetchImpl }));
+  assert.equal(out.crawl_id, "c_1");
+  assert.deepEqual(calls, ["GET", "GET", "GET"]);
+});
+
+test("a GET gives up after 3 retries", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = sequence([503, 503, 503, 503, 503]);
+  await assert.rejects(settle(t, getCrawl("c_1", { apiKey: "k", fetchImpl })), (e: unknown) => {
+    return e instanceof CrawlError && e.code === "CRAWL_FAILED" && e.status === 503;
+  });
+  assert.equal(calls.length, 4);
+});
+
+test("a create without an idempotency key is not retried on 503", async () => {
+  const { calls, fetchImpl } = sequence([503]);
+  await assert.rejects(createCrawl(createBody, { apiKey: "k", fetchImpl }), (e: unknown) => {
+    return e instanceof CrawlError && e.status === 503;
+  });
+  assert.equal(calls.length, 1);
+});
+
+test("a create with an idempotency key is retried on 503", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = sequence([503]);
+  const out = await settle(t, createCrawl(createBody, { apiKey: "k", fetchImpl, idempotencyKey: "key-1" }));
+  assert.equal(out.crawl_id, "c_1");
+  assert.deepEqual(calls, ["POST", "POST"]);
+});
+
+test("a create is never retried on 429, even with an idempotency key", async () => {
+  const { calls, fetchImpl } = sequence([429], { "retry-after": "1" });
+  await assert.rejects(createCrawl(createBody, { apiKey: "k", fetchImpl, idempotencyKey: "key-1" }), (e: unknown) => {
+    return e instanceof CrawlError && e.code === "CRAWL_TOO_MANY_CRAWLS" && e.retryAfter === 1;
+  });
+  assert.equal(calls.length, 1);
+});
+
+test("stop is not retried", async () => {
+  const { calls, fetchImpl } = sequence([503]);
+  await assert.rejects(stopCrawl("c_1", { apiKey: "k", fetchImpl }), (e: unknown) => {
+    return e instanceof CrawlError && e.status === 503;
+  });
+  assert.equal(calls.length, 1);
+});
+
+test("a retry waits the Retry-After seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = sequence([429], { "retry-after": "5" });
+  const done = getCrawl("c_1", { apiKey: "k", fetchImpl });
+  await flush();
+  assert.equal(calls.length, 1);
+  t.mock.timers.tick(4_999);
+  await flush();
+  assert.equal(calls.length, 1, "no retry before Retry-After");
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal(calls.length, 2);
+  assert.equal((await done).crawl_id, "c_1");
+});
+
+test("a GET is retried after a network error", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  const fetchImpl = (async () => {
+    if (++calls === 1) throw new TypeError("fetch failed: ECONNRESET");
+    return jsonResponse({ crawls: [] });
+  }) as typeof fetch;
+  await settle(t, listCrawls({ apiKey: "k", fetchImpl }));
+  assert.equal(calls, 2);
 });

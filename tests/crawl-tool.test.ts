@@ -117,6 +117,41 @@ test("crawl_create sends only the fields the caller set", async () => {
   });
 });
 
+test("crawl_create takes idempotency_key and has no follow or timeout", () => {
+  const shape = register().configs.crawl_create.inputSchema;
+  assert.equal("follow" in shape, false);
+  assert.equal("timeout" in shape, false);
+  assert.equal("idempotency_key" in shape, true);
+});
+
+test("crawl_create sends Idempotency-Key only when idempotency_key is set", async () => {
+  const { handlers } = register();
+  const keys: Array<string | undefined> = [];
+  await withFetch(
+    (_u, init) => {
+      keys.push((init?.headers as Record<string, string>)["Idempotency-Key"]);
+      return jsonResponse(crawl(), 202);
+    },
+    async () => {
+      await handlers.crawl_create({ url: "https://example.com/", depth: 1 });
+      await handlers.crawl_create({ url: "https://example.com/", depth: 1, idempotency_key: null });
+      await handlers.crawl_create({ url: "https://example.com/", depth: 1, idempotency_key: "key-1" });
+    }
+  );
+  assert.deepEqual(keys, [undefined, undefined, "key-1"]);
+});
+
+test("crawl_create tells the agent to send a new key when the key was reused", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ code: "idempotency_key_reused", title: "Key reused", status: 422 }, 422),
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, idempotency_key: "key-1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.code, "CRAWL_INVALID_REQUEST");
+  assert.match(body.message, /Send a new idempotency_key, or none/);
+});
+
 test("crawl_create surfaces 403 REQS008 as CRAWL_NOT_ENABLED", async () => {
   const { handlers } = register();
   const out = await withFetch(
@@ -140,36 +175,7 @@ test("crawl_create surfaces 403 REQS008 as CRAWL_NOT_ENABLED", async () => {
   assert.equal(body.crawl_id, undefined, "nothing was created");
 });
 
-test("crawl_create with follow returns the running crawl, not an error, when the timeout runs out", async () => {
-  const { handlers } = register();
-  const out = await withFetch(
-    (_u, init) => jsonResponse(crawl("running"), init?.method === "POST" ? 202 : 200),
-    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, follow: true, timeout: 1 })
-  );
-  assert.equal(out.isError, undefined);
-  const body = JSON.parse(out.content[0].text);
-  assert.equal(body.crawl_id, "c_1");
-  assert.equal(body.status, "running");
-  assert.match(body.note, /call crawl_wait again/i);
-});
-
-test("crawl_create with follow carries crawl_id when the wait fails after the create", async () => {
-  const { handlers } = register();
-  const out = await withFetch(
-    (_u, init) =>
-      init?.method === "POST"
-        ? jsonResponse(crawl("running"), 202)
-        : jsonResponse({ code: "internal_error", title: "Internal error", status: 500 }, 500),
-    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, follow: true })
-  );
-  assert.equal(out.isError, true);
-  const body = JSON.parse(out.content[0].text);
-  assert.equal(body.code, "CRAWL_FAILED");
-  assert.equal(body.server_code, "internal_error");
-  assert.equal(body.crawl_id, "c_1");
-});
-
-test("crawl_create without follow returns the crawl with no note", async () => {
+test("crawl_create returns the crawl at once, with no note", async () => {
   const { handlers } = register();
   const out = await withFetch(
     () => jsonResponse(crawl("running"), 202),
@@ -304,25 +310,34 @@ test("crawl_results on an ended crawl read to the end is not partial", async () 
   assert.equal(body.note, undefined);
 });
 
-test("crawl_content takes a content_url, returns the HTML, and cuts it at max_chars", async () => {
+test("crawl_content takes a content id or a content_url", async () => {
   const { handlers } = register();
-  const html = "<html>" + "x".repeat(5000) + "</html>";
   const urls: string[] = [];
-  const out = await withFetch(
+  await withFetch(
     (u) => {
       urls.push(u);
-      return new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+      return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
     },
-    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1/contents/ct_9", max_chars: 1000 })
+    async () => {
+      await handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" });
+      await handlers.crawl_content({ crawl_id: "c_1", content: "/v1/crawls/c_1/contents/ct_9" });
+    }
   );
   assert.match(urls[0], /\/crawls\/c_1\/contents\/ct_9$/);
+  assert.equal(urls[1], urls[0]);
+});
+
+test("crawl_content returns the HTML and cuts it at max_chars", async () => {
+  const { handlers } = register();
+  const html = "<html>" + "x".repeat(5000) + "</html>";
+  const respond = () => new Response(html, { status: 200, headers: { "content-type": "text/html" } });
+  const out = await withFetch(respond, () =>
+    handlers.crawl_content({ crawl_id: "c_1", content: "ct_9", max_chars: 1000 })
+  );
   assert.equal(out.content[0].text, html.slice(0, 1000));
   assert.match(out.content[1].text, /truncated: returned 1000 of 5013/);
 
-  const full = await withFetch(
-    () => new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
-    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1/contents/ct_9" })
-  );
+  const full = await withFetch(respond, () => handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" }));
   assert.equal(full.content.length, 1, "5013 characters fit under the 20000 default");
   assert.equal(full.content[0].text, html);
 });
@@ -331,13 +346,13 @@ test("crawl_content cuts at 20000 characters by default", async () => {
   const { handlers } = register();
   const out = await withFetch(
     () => new Response("x".repeat(25_000), { status: 200, headers: { "content-type": "text/html" } }),
-    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1/contents/ct_9" })
+    () => handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" })
   );
   assert.equal(out.content[0].text.length, 20_000);
   assert.match(out.content[1].text, /returned 20000 of 25000/);
 });
 
-test("crawl_content with a content_url it cannot read is an INVALID_USAGE error, with no request", async () => {
+test("crawl_content with no content id in content is an INVALID_USAGE error, with no request", async () => {
   const { handlers } = register();
   let called = false;
   const out = await withFetch(
@@ -345,7 +360,7 @@ test("crawl_content with a content_url it cannot read is an INVALID_USAGE error,
       called = true;
       return jsonResponse({});
     },
-    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1" })
+    () => handlers.crawl_content({ crawl_id: "c_1", content: "/" })
   );
   assert.equal(out.isError, true);
   assert.equal(JSON.parse(out.content[0].text).code, "INVALID_USAGE");

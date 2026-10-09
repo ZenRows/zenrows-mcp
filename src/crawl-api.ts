@@ -140,46 +140,80 @@ interface RequestOpts {
   apiKey: string;
   body?: unknown;
   query?: Record<string, string | undefined>;
+  idempotencyKey?: string;
   timeoutMs?: number;
   userAgent?: string;
   fetchImpl?: typeof fetch;
 }
 
+const RETRIES = 3;
+const GET_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
+// 429 too_many_crawls is a capacity limit: a retry only waits for a slot the caller may never get.
+const CREATE_RETRY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+
+/** 250 ms x 2^attempt, +/-20% jitter, capped at 10 s. */
+function backoffMs(attempt: number): number {
+  return Math.min(250 * 2 ** attempt, 10_000) * (0.8 + Math.random() * 0.4);
+}
+
+function retryAfterSeconds(header: string | null | undefined): number | undefined {
+  const seconds = Number(header);
+  return header && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * GETs retry; a POST retries only with an idempotency key (create), so stop never does.
+ * Network errors, the request timeout included, retry under the same rule.
+ */
 async function crawlFetch(method: string, path: string, opts: RequestOpts, accept: string): Promise<Response> {
   const url = new URL(crawlBase() + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v !== undefined && v !== null) url.searchParams.set(k, v);
   }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
   const headers: Record<string, string> = {
     "X-API-Key": opts.apiKey,
     Accept: accept,
     "User-Agent": opts.userAgent ?? "zenrows/mcp",
   };
   if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-
+  if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+  const retryStatuses = method === "GET" ? GET_RETRY_STATUSES : opts.idempotencyKey ? CREATE_RETRY_STATUSES : undefined;
   const doFetch = opts.fetchImpl ?? fetch;
-  try {
-    const res = await doFetch(url.toString(), {
-      method,
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-      signal: controller.signal,
-    });
-    if (res.status < 200 || res.status >= 300) {
-      throw problemToError(res.status, await res.text(), method, path, res.headers.get("retry-after"));
+
+  for (let attempt = 0; ; attempt++) {
+    const canRetry = retryStatuses !== undefined && attempt < RETRIES;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
+    let res: Response;
+    try {
+      res = await doFetch(url.toString(), {
+        method,
+        headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      if (canRetry) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw new CrawlError({
+        code: "BACKEND_UNAVAILABLE",
+        message: `Could not reach the Zenrows Crawl API: ${err instanceof Error ? err.message : String(err)}`,
+      });
     }
-    return res;
-  } catch (err) {
-    if (err instanceof CrawlError) throw err;
-    throw new CrawlError({
-      code: "BACKEND_UNAVAILABLE",
-      message: `Could not reach the Zenrows Crawl API: ${err instanceof Error ? err.message : String(err)}`,
-    });
-  } finally {
     clearTimeout(timeout);
+    if (res.status >= 200 && res.status < 300) return res;
+    const retryAfter = retryAfterSeconds(res.headers.get("retry-after"));
+    if (canRetry && retryStatuses.has(res.status)) {
+      await res.body?.cancel();
+      await sleep(retryAfter !== undefined ? retryAfter * 1000 : backoffMs(attempt));
+      continue;
+    }
+    throw problemToError(res.status, await res.text(), method, path, retryAfter);
   }
 }
 
@@ -203,7 +237,7 @@ export function problemToError(
   body: string,
   method: string,
   path: string,
-  retryAfterHeader?: string | null
+  retryAfter?: number
 ): CrawlError {
   let problem: ProblemJson = {};
   try {
@@ -238,11 +272,10 @@ export function problemToError(
         );
   }
   if (status === 429) {
-    const seconds = Number(retryAfterHeader);
     return error(
       "CRAWL_TOO_MANY_CRAWLS",
       "The account has reached its limit of active jobs (3 by default), shared with its Batch jobs. Wait for a crawl or Batch job to finish, or stop one with crawl_stop or batch_cancel, then retry after retry_after seconds.",
-      Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+      retryAfter
     );
   }
   if (status === 402 && serverCode === "AUTH014") {
@@ -261,9 +294,10 @@ export function problemToError(
     );
   }
   if (status === 400 || status === 422) {
+    const advice = serverCode === "idempotency_key_reused" ? " Send a new idempotency_key, or none." : "";
     return error(
       "CRAWL_INVALID_REQUEST",
-      `Crawl rejected the request${serverCode ? ` (${serverCode})` : ""}: ${detail}`
+      `Crawl rejected the request${serverCode ? ` (${serverCode})` : ""}: ${detail}${advice}`
     );
   }
   return error("CRAWL_FAILED", `Crawl request failed (HTTP ${status}).`);
@@ -278,7 +312,7 @@ interface CallOpts {
 
 const crawlPath = (id: string) => `/crawls/${encodeURIComponent(id)}`;
 
-export function createCrawl(body: CreateCrawlBody, opts: CallOpts): Promise<Crawl> {
+export function createCrawl(body: CreateCrawlBody, opts: CallOpts & { idempotencyKey?: string }): Promise<Crawl> {
   return crawlRequest<Crawl>("POST", "/crawls", { ...opts, body });
 }
 
@@ -310,11 +344,9 @@ export async function getCrawlContent(
   return { contentType: res.headers.get("content-type") ?? "", body: await res.text() };
 }
 
-/** Reads the crawl and content ids out of a result's content_url (/v1/crawls/{crawl}/contents/{content}). */
-export function parseContentUrl(contentUrl: string): { crawlId: string; contentId: string } | undefined {
-  const m = contentUrl.match(/\/crawls\/([^/?#]+)\/contents\/([^/?#]+)/);
-  if (!m) return undefined;
-  return { crawlId: decodeURIComponent(m[1]), contentId: decodeURIComponent(m[2]) };
+/** A content id as given, or the last path segment of a result's content_url. */
+export function contentIdOf(content: string): string {
+  return content.split(/[?#]/)[0].replace(/\/+$/, "").split("/").pop() ?? "";
 }
 
 /** Default page size for crawl_get and cap for crawl_results, to keep a tool answer small. */
