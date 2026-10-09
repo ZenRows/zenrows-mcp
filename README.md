@@ -123,6 +123,8 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 }
 ```
 
+**Optional:** `ZENROWS_CRAWL_API_BASE` sets the Crawl API base URL for the `crawl_*` tools (default `https://api.zenrows.com/v1`). Set it only to point those tools at another deployment.
+
 The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
 
 ---
@@ -136,6 +138,7 @@ The Zenrows MCP exposes these tool families:
 | **`scrape`** | Full-page content → Markdown, plain text, HTML, PDF, or screenshot (plus helper outputs). |
 | **`extract`** | Structured JSON (`extract=auto`, autoparse, or `css_extractor`) + optional stealth flags. `extract=auto` is open beta (currently free; billing may apply later). |
 | **`batch_create` / `batch_status` / `batch_results` / `batch_cancel` / `batch_wait`** | Cloud Batch API fan-out (`async.api.zenrows.com`). Beta; may return `BATCH_ACCESS_DENIED`. Not `browser_batch`. |
+| **`crawl_create` / `crawl_get` / `crawl_results` / `crawl_content` / `crawl_list` / `crawl_stop` / `crawl_wait`** | Crawl API (`api.zenrows.com/v1/crawls`). New. Crawl is still evolving: new features are coming, limits may be tuned, and the changelog announces each change. Give one start URL, get back the URLs behind it on the same registrable domain (subdomains count), optionally with each page's HTML (`output_format: "html"`). `crawl_create` returns at once; call `crawl_wait`, then `crawl_results`. Set `idempotency_key` on `crawl_create` to make a retry safe. `crawl_content` takes `crawl_id` and `content` (a content id or a result's `content_url`). Reads retry on 429, 502, 503, 504 and network errors (up to 3 times, honoring `Retry-After`); `crawl_create` retries only with an `idempotency_key`, and never on 429; `crawl_stop` never retries. May return `CRAWL_NOT_ENABLED` (Crawl is not enabled for this account). |
 | **`browser_*`** | 30+ tools for full browser automation (navigation, clicks, forms, JS, cookies, tabs, sessions). |
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
@@ -155,6 +158,25 @@ npm run dev            # Run with .env loaded (requires Node.js 20.6+)
 npm run build          # Compile to dist/
 npm run inspect        # Open the MCP inspector UI
 ```
+
+### Running the Crawl end-to-end test
+
+`npm test` stays offline. `npm run test:e2e` drives the `crawl_*` tools through a real MCP client against a live Crawl API: it creates a small crawl (depth 1, at most 3 URLs and 5 pages) of the start URL you give it, waits for it, reads its results and one page, lists crawls, stops the ended crawl, and checks the not-found error. It is skipped unless the first three variables are set:
+
+- `ZENROWS_API_KEY`: a key with Crawl access.
+- `ZENROWS_CRAWL_API_BASE`: the Crawl API base, e.g. `https://api.zenrows.com/v1`. Point it at a local or staging deployment to test against that instead.
+- `ZENROWS_E2E_CRAWL_URL`: the start URL to crawl, a listing page whose links lead to item pages.
+- `ZENROWS_E2E_CRAWL_INCLUDE` (optional): an include pattern; when set, the test checks that every result URL contains it.
+
+```bash
+export ZENROWS_API_KEY=...            # a key with Crawl access
+export ZENROWS_CRAWL_API_BASE=https://api.zenrows.com/v1
+export ZENROWS_E2E_CRAWL_URL=https://example.com/products/
+export ZENROWS_E2E_CRAWL_INCLUDE=/product/
+npm run test:e2e
+```
+
+The crawl is billed to the key's account (at most 5 page fetches), and it counts against the account's limit of active jobs (3 by default), shared with its Batch jobs. When the account has reached that limit, the test waits and retries for up to 5 minutes.
 
 Pull requests and issues are welcome.
 
