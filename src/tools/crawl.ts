@@ -5,6 +5,8 @@ import { appendClaimHint } from "../auth/claim-hint.js";
 import {
   Crawl,
   CrawlError,
+  CrawlResult,
+  CrawlStop,
   createCrawl,
   CreateCrawlBody,
   DEFAULT_LIMIT,
@@ -65,19 +67,19 @@ function crawlErr(e: unknown, crawlId?: string): { content: TextContent[]; isErr
   return err(crawlId ? { ...data, crawl_id: crawlId } : data, hint);
 }
 
-function crawlOut(crawl: Crawl, waited = false): { content: TextContent[] } {
-  return json({
-    ok: true,
-    crawl_id: crawl.crawl_id,
-    status: crawl.status,
-    coverage: crawl.coverage,
-    ...(waited && !isTerminal(crawl.status)
-      ? {
-          note: "The wait ran out and the crawl is still running. Call crawl_wait again, read partial results with crawl_results, or stop it with crawl_stop.",
-        }
-      : {}),
-    crawl,
-  });
+const WAIT_NOTE =
+  "The wait ran out and the crawl is still running. Call crawl_wait again, read partial results with crawl_results, or stop it with crawl_stop.";
+
+/** The one output shape of crawl_create, crawl_get, crawl_wait and crawl_stop. */
+function crawlOut(
+  crawl: CrawlStop,
+  more: { note?: string; results?: CrawlResult[]; next_cursor?: string | null } = {}
+): { content: TextContent[] } {
+  return json({ ok: true, crawl_id: crawl.crawl_id, status: crawl.status, crawl, ...more });
+}
+
+function waitedOut(crawl: Crawl): { content: TextContent[] } {
+  return crawlOut(crawl, isTerminal(crawl.status) ? {} : { note: WAIT_NOTE });
 }
 
 const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
@@ -104,7 +106,7 @@ Each page fetched is billed as one scrape on this account; max_pages bounds the 
 itself is never a result. Set output_format "html" to also store each kept URL's page,
 then read it with crawl_content.
 
-Returns the crawl (crawl_id, status, coverage). The crawl runs asynchronously: pass
+Returns crawl_id, status and the crawl (with coverage). The crawl runs asynchronously: pass
 follow=true, or call crawl_wait / crawl_get, then crawl_results. If the wait runs out,
 the answer is the crawl with status running: call crawl_wait again. An error after the
 crawl started carries its crawl_id.
@@ -171,7 +173,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       }
       if (params.follow !== true) return crawlOut(created);
       try {
-        return crawlOut(await waitForCrawl(created.crawl_id, { ...call, timeout: params.timeout ?? undefined }), true);
+        return waitedOut(await waitForCrawl(created.crawl_id, { ...call, timeout: params.timeout ?? undefined }));
       } catch (e) {
         return crawlErr(e, created.crawl_id);
       }
@@ -182,7 +184,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
     "crawl_get",
     {
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false },
-      description: `Beta: Get a crawl and one page of the URLs it kept: status (running, completed, stopped, failed), coverage (pages_fetched, pages_failed, items_found), results and next_cursor.
+      description: `Beta: Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
 completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {
@@ -193,8 +195,12 @@ completed with stop_reason max_items / max_pages means a limit ended it; failed 
     },
     async ({ crawl_id, cursor, limit }) => {
       try {
-        const page = await getCrawl(crawl_id, { ...call, cursor: cursor ?? undefined, limit: limit ?? DEFAULT_LIMIT });
-        return json({ ok: true, ...page });
+        const { results, next_cursor, ...crawl } = await getCrawl(crawl_id, {
+          ...call,
+          cursor: cursor ?? undefined,
+          limit: limit ?? DEFAULT_LIMIT,
+        });
+        return crawlOut(crawl, { results, next_cursor });
       } catch (e) {
         return crawlErr(e, crawl_id);
       }
@@ -322,8 +328,7 @@ Idempotent: a crawl that already ended answers with its final status. Pages in f
     },
     async ({ crawl_id }) => {
       try {
-        const stopped = await stopCrawl(crawl_id, call);
-        return json({ ok: true, crawl_id: stopped.crawl_id, status: stopped.status, crawl: stopped });
+        return crawlOut(await stopCrawl(crawl_id, call));
       } catch (e) {
         return crawlErr(e, crawl_id);
       }
@@ -345,7 +350,7 @@ Idempotent: a crawl that already ended answers with its final status. Pages in f
     },
     async ({ crawl_id, timeout }) => {
       try {
-        return crawlOut(await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined }), true);
+        return waitedOut(await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined }));
       } catch (e) {
         return crawlErr(e, crawl_id);
       }
