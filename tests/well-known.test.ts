@@ -32,7 +32,52 @@ test("the protected resource names the scope the token grants", async () => {
 
   assert.equal(statusCode, 200);
   assert.deepEqual(json.scopes_supported, ["api"]);
-  assert.equal(json.resource_documentation, "https://docs.zenrows.com");
+  // The docs root 308s to a welcome page; this is the MCP page itself.
+  assert.equal(json.resource_documentation, "https://docs.zenrows.com/mcp/overview");
+});
+
+test("bearer methods are the RFC 6750 ones the server really reads", async () => {
+  // "query" in RFC 6750 is ?access_token=, which /mcp never reads (it reads ?apikey=).
+  for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
+    const { json } = await get(path);
+    assert.deepEqual(json.bearer_methods_supported, ["header"], path);
+  }
+});
+
+test("each protected resource document names the resource its URL was built from", async () => {
+  // RFC 9728 §3.3: a client must discard a document whose `resource` differs.
+  const root = await get("/.well-known/oauth-protected-resource");
+  assert.equal(root.statusCode, 200);
+  assert.equal(root.json.resource, "https://mcp.zenrows.com");
+
+  const endpoint = await get("/.well-known/oauth-protected-resource/mcp");
+  assert.equal(endpoint.statusCode, 200);
+  assert.equal(endpoint.json.resource, "https://mcp.zenrows.com/mcp");
+
+  const { resource: _root, ...rootRest } = root.json;
+  const { resource: _endpoint, ...endpointRest } = endpoint.json;
+  assert.deepEqual(endpointRest, rootRest);
+});
+
+test("the key is read from a Bearer header and ?apikey=, never ?access_token=", async () => {
+  const initialize = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+  });
+  const call = (headers: Record<string, string>, rawQueryString?: string) =>
+    handler({
+      requestContext: { http: { method: "POST" } },
+      rawPath: "/mcp",
+      rawQueryString,
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+      body: initialize,
+    });
+
+  assert.equal((await call({ authorization: "Bearer test-key" })).statusCode, 200);
+  assert.equal((await call({}, "apikey=test-key")).statusCode, 200);
+  assert.equal((await call({}, "access_token=test-key")).statusCode, 401);
 });
 
 test("an empty scope list is never published", async () => {
@@ -65,5 +110,11 @@ test("the challenge on an unauthenticated call names the scope", async () => {
 
   const challenge = response.headers["www-authenticate"];
   assert.match(challenge, /scope="api"/);
-  assert.match(challenge, /resource_metadata="https:\/\/mcp\.zenrows\.com/);
+
+  // RFC 9728 §3.3: the document the challenge points at must name the URL just called.
+  const metadataUrl = new URL(challenge.match(/resource_metadata="([^"]+)"/)![1]);
+  assert.equal(metadataUrl.origin, "https://mcp.zenrows.com");
+  const { json } = await get(metadataUrl.pathname);
+  assert.equal(json.resource, "https://mcp.zenrows.com/mcp");
+  assert.equal(response.headers.link, `<${metadataUrl.href}>; rel="oauth-protected-resource"`);
 });
