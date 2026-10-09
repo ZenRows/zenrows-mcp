@@ -3,10 +3,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import {
+  Crawl,
   CrawlError,
-  CrawlResult,
   createCrawl,
   CreateCrawlBody,
+  DEFAULT_MAX_RESULTS,
+  DEFAULT_WAIT_MS,
   getCrawl,
   getCrawlContent,
   isTerminal,
@@ -24,7 +26,7 @@ const pkg = require("../../package.json") as { version: string };
 type TextContent = { type: "text"; text: string };
 
 /** Default cap on crawl_content's HTML, in characters; a page can run to megabytes. */
-export const DEFAULT_CONTENT_MAX_CHARS = 100_000;
+export const DEFAULT_CONTENT_MAX_CHARS = 20_000;
 
 function err(
   data: unknown,
@@ -54,20 +56,29 @@ function json(data: unknown): { content: TextContent[] } {
   return { content: [{ type: "text", text: JSON.stringify(data) }] };
 }
 
-function crawlErr(e: unknown): { content: TextContent[]; isError: true } {
-  if (e instanceof CrawlError) {
-    return err(e.toJSON(), { status: e.status, code: e.code, message: e.message });
-  }
-  return err({
-    code: "CRAWL_FAILED",
-    message: e instanceof Error ? e.message : String(e),
-  });
+/** crawlId: set when the crawl exists, so the agent never takes a failed wait for a failed create. */
+function crawlErr(e: unknown, crawlId?: string): { content: TextContent[]; isError: true } {
+  const data =
+    e instanceof CrawlError
+      ? e.toJSON()
+      : { code: "CRAWL_FAILED", message: e instanceof Error ? e.message : String(e) };
+  const hint = e instanceof CrawlError ? { status: e.status, code: e.code, message: e.message } : undefined;
+  return err(crawlId ? { ...data, crawl_id: crawlId } : data, hint);
 }
 
-/** A result row plus the content_id crawl_content takes, read off content_url. */
-function withContentId(row: CrawlResult): CrawlResult & { content_id?: string } {
-  const parsed = row.content_url ? parseContentUrl(row.content_url) : undefined;
-  return parsed ? { ...row, content_id: parsed.contentId } : row;
+function crawlOut(crawl: Crawl, waited = false): { content: TextContent[] } {
+  return json({
+    ok: true,
+    crawl_id: crawl.crawl_id,
+    status: crawl.status,
+    coverage: crawl.coverage,
+    ...(waited && !isTerminal(crawl.status)
+      ? {
+          note: "The wait ran out and the crawl is still running. Call crawl_wait again, read partial results with crawl_results, or stop it with crawl_stop.",
+        }
+      : {}),
+    crawl,
+  });
 }
 
 const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
@@ -83,7 +94,7 @@ export function registerCrawlTools(server: McpServer, apiKey: string): void {
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false },
-      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's domain.
+      description: `Beta: Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
 
 ${WHEN_TO_USE}
 
@@ -93,9 +104,11 @@ itself is never a result. Set output_format "html" to also store each kept URL's
 then read it with crawl_content.
 
 Returns the crawl (crawl_id, status, coverage). The crawl runs asynchronously: pass
-wait=true, or call crawl_wait / crawl_status, then crawl_results.
+wait=true, or call crawl_wait / crawl_status, then crawl_results. If the wait runs out,
+the answer is the crawl with status running: call crawl_wait again. An error after the
+crawl started carries its crawl_id.
 CRAWL_NOT_ENABLED: Crawl is not enabled for this account; do not retry.
-CRAWL_TOO_MANY_CRAWLS: the account has too many crawls running; retry after retry_after seconds.`,
+CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by default), shared with its Batch jobs; retry after retry_after seconds.`,
       inputSchema: {
         url: z.string().url().describe("Start URL: a public http(s) page, such as a listing or category page"),
         depth: z
@@ -139,7 +152,9 @@ CRAWL_TOO_MANY_CRAWLS: the account has too many crawls running; retry after retr
           .min(1000)
           .max(3_600_000)
           .nullish()
-          .describe("Max wait time when wait=true (default 600000)"),
+          .describe(
+            `Max wait time when wait=true (default ${DEFAULT_WAIT_MS}). Many MCP clients cancel a call after 60000.`
+          ),
       },
     },
     async (params) => {
@@ -150,15 +165,20 @@ CRAWL_TOO_MANY_CRAWLS: the account has too many crawls running; retry after retr
       if (params.exclude_patterns?.length) body.exclude_patterns = params.exclude_patterns;
       if (params.output_format) body.output_format = params.output_format;
 
+      let created: Crawl;
       try {
-        const created = await createCrawl(body, call);
-        const crawl =
-          params.wait === true
-            ? await waitForCrawl(created.crawl_id, { ...call, pollTimeoutMs: params.wait_timeout_ms ?? 600_000 })
-            : created;
-        return json({ ok: true, crawl_id: crawl.crawl_id, status: crawl.status, coverage: crawl.coverage, crawl });
+        created = await createCrawl(body, call);
       } catch (e) {
         return crawlErr(e);
+      }
+      if (params.wait !== true) return crawlOut(created);
+      try {
+        return crawlOut(
+          await waitForCrawl(created.crawl_id, { ...call, pollTimeoutMs: params.wait_timeout_ms ?? DEFAULT_WAIT_MS }),
+          true
+        );
+      } catch (e) {
+        return crawlErr(e, created.crawl_id);
       }
     }
   );
@@ -167,15 +187,14 @@ CRAWL_TOO_MANY_CRAWLS: the account has too many crawls running; retry after retr
     "crawl_status",
     {
       annotations: { title: "Crawl Status", readOnlyHint: true, destructiveHint: false },
-      description: `Get a crawl's status (running, completed, stopped, failed) and coverage (pages_fetched, pages_failed, items_found). Returns no results: read those with crawl_results.
+      description: `Beta: Get a crawl's status (running, completed, stopped, failed) and coverage (pages_fetched, pages_failed, items_found). Returns no results: read those with crawl_results.
 
 completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail.`,
       inputSchema: { crawl_id: crawlIdSchema },
     },
     async ({ crawl_id }) => {
       try {
-        const crawl = withoutResults(await getCrawl(crawl_id, { ...call, limit: 1 }));
-        return json({ ok: true, crawl_id: crawl.crawl_id, status: crawl.status, coverage: crawl.coverage, crawl });
+        return crawlOut(withoutResults(await getCrawl(crawl_id, { ...call, limit: 1 })));
       } catch (e) {
         return crawlErr(e);
       }
@@ -186,9 +205,9 @@ completed with stop_reason max_items / max_pages means a limit ended it; failed 
     "crawl_results",
     {
       annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false },
-      description: `List the URLs a crawl kept, in the order it kept them, following the API's pages up to max_results.
+      description: `Beta: List the URLs a crawl kept, in the order it kept them, following the API's pages up to max_results.
 
-Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url and content_id for crawl_content.
+Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url: pass it to crawl_content.
 
 While the crawl runs the list is partial (partial=true): call again later with the returned next_cursor to get only the URLs kept since. next_cursor is null once the crawl ended and every URL was read.`,
       inputSchema: {
@@ -200,7 +219,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
           .min(1)
           .max(10_000)
           .nullish()
-          .describe("Max results to return in this call (default 1000)"),
+          .describe(`Max results to return in this call (default ${DEFAULT_MAX_RESULTS})`),
       },
     },
     async ({ crawl_id, cursor, max_results }) => {
@@ -208,7 +227,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
         const read = await readResults(crawl_id, {
           ...call,
           cursor: cursor ?? undefined,
-          maxResults: max_results ?? 1000,
+          maxResults: max_results ?? DEFAULT_MAX_RESULTS,
         });
         const partial = !isTerminal(read.status) || read.next_cursor !== null;
         return json({
@@ -225,7 +244,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
                   : "The crawl is still running, so this list is partial: call crawl_results again with next_cursor later, or crawl_wait first.",
               }
             : {}),
-          results: read.results.map(withContentId),
+          results: read.results,
         });
       } catch (e) {
         return crawlErr(e);
@@ -237,18 +256,15 @@ While the crawl runs the list is partial (partial=true): call again later with t
     "crawl_content",
     {
       annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false },
-      description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
+      description: `Beta: Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
 
-Pass content_url from crawl_results, or crawl_id + content_id. Returns raw HTML,
+Pass content_url from crawl_results. Returns raw HTML,
 cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
 markdown version of a page, use scrape on its URL instead.`,
       inputSchema: {
         content_url: z
           .string()
-          .nullish()
           .describe("content_url from a crawl_results row (/v1/crawls/{crawl_id}/contents/{content_id})"),
-        crawl_id: z.string().nullish().describe("Crawl id; with content_id, instead of content_url"),
-        content_id: z.string().nullish().describe("content_id from a crawl_results row (ct_…)"),
         max_chars: z
           .number()
           .int()
@@ -258,17 +274,12 @@ markdown version of a page, use scrape on its URL instead.`,
           .describe(`Max characters of HTML to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
       },
     },
-    async ({ content_url, crawl_id, content_id, max_chars }) => {
-      const ids = content_url
-        ? parseContentUrl(content_url)
-        : crawl_id && content_id
-          ? { crawlId: crawl_id, contentId: content_id }
-          : undefined;
+    async ({ content_url, max_chars }) => {
+      const ids = parseContentUrl(content_url);
       if (!ids) {
         return err({
           code: "INVALID_USAGE",
-          message:
-            "Provide content_url from crawl_results (/v1/crawls/{crawl_id}/contents/{content_id}), or crawl_id and content_id.",
+          message: "Pass content_url from a crawl_results row (/v1/crawls/{crawl_id}/contents/{content_id}).",
         });
       }
       try {
@@ -293,7 +304,7 @@ markdown version of a page, use scrape on its URL instead.`,
     {
       annotations: { title: "List Crawls", readOnlyHint: true, destructiveHint: false },
       description:
-        "List this account's crawls, newest first, with status and coverage (no results). Pass next_cursor as cursor for the next page; next_cursor is absent on the last page.",
+        "Beta: List this account's crawls, newest first, with status and coverage (no results). Pass next_cursor as cursor for the next page; next_cursor is absent on the last page.",
       inputSchema: {
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_list call"),
         limit: z.number().int().min(1).max(100).nullish().describe("Crawls per page (default 20, max 100)"),
@@ -313,10 +324,10 @@ markdown version of a page, use scrape on its URL instead.`,
   server.registerTool(
     "crawl_stop",
     {
-      annotations: { title: "Stop Crawl", readOnlyHint: false, destructiveHint: true },
-      description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
+      annotations: { title: "Stop Crawl", readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+      description: `Beta: Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
-Idempotent: a crawl that already ended answers with its final status. Coverage can still settle for a moment after the stop; read it with crawl_status.`,
+Idempotent: a crawl that already ended answers with its final status. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_status and crawl_results.`,
       inputSchema: { crawl_id: crawlIdSchema },
     },
     async ({ crawl_id }) => {
@@ -334,7 +345,7 @@ Idempotent: a crawl that already ended answers with its final status. Coverage c
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false },
       description:
-        "Poll a crawl until it ends (completed, stopped, or failed) and return its status and coverage. On timeout it returns CRAWL_WAIT_TIMEOUT and the crawl keeps running.",
+        "Beta: Poll a crawl until it ends (completed, stopped, or failed) and return its status and coverage. If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.",
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout_ms: z
@@ -343,13 +354,12 @@ Idempotent: a crawl that already ended answers with its final status. Coverage c
           .min(1000)
           .max(3_600_000)
           .nullish()
-          .describe("Max wait time in ms (default 600000)"),
+          .describe(`Max wait time in ms (default ${DEFAULT_WAIT_MS}). Many MCP clients cancel a call after 60000.`),
       },
     },
     async ({ crawl_id, timeout_ms }) => {
       try {
-        const crawl = await waitForCrawl(crawl_id, { ...call, pollTimeoutMs: timeout_ms ?? 600_000 });
-        return json({ ok: true, crawl_id: crawl.crawl_id, status: crawl.status, coverage: crawl.coverage, crawl });
+        return crawlOut(await waitForCrawl(crawl_id, { ...call, pollTimeoutMs: timeout_ms ?? DEFAULT_WAIT_MS }), true);
       } catch (e) {
         return crawlErr(e);
       }

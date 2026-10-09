@@ -136,7 +136,7 @@ The Zenrows MCP exposes these tool families:
 | **`scrape`** | Full-page content → Markdown, plain text, HTML, PDF, or screenshot (plus helper outputs). |
 | **`extract`** | Structured JSON (`extract=auto`, autoparse, or `css_extractor`) + optional stealth flags. `extract=auto` is open beta (currently free; billing may apply later). |
 | **`batch_create` / `batch_status` / `batch_results` / `batch_cancel` / `batch_wait`** | Cloud Batch API fan-out (`async.api.zenrows.com`). Beta; may return `BATCH_ACCESS_DENIED`. Not `browser_batch`. |
-| **`crawl_create` / `crawl_status` / `crawl_results` / `crawl_content` / `crawl_list` / `crawl_stop` / `crawl_wait`** | Crawl API (`api.zenrows.com/v1/crawls`): give one start URL, get back the URLs behind it on the same domain, optionally with each page's HTML (`output_format: "html"`). May return `CRAWL_NOT_ENABLED` (Crawl is not enabled for this account). |
+| **`crawl_create` / `crawl_status` / `crawl_results` / `crawl_content` / `crawl_list` / `crawl_stop` / `crawl_wait`** | Crawl API (`api.zenrows.com/v1/crawls`). Beta. Give one start URL, get back the URLs behind it on the same registrable domain (subdomains count), optionally with each page's HTML (`output_format: "html"`). May return `CRAWL_NOT_ENABLED` (Crawl is not enabled for this account). |
 | **`browser_*`** | 30+ tools for full browser automation (navigation, clicks, forms, JS, cookies, tabs, sessions). |
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
@@ -174,7 +174,7 @@ export ZENROWS_E2E_CRAWL_INCLUDE=/product/
 npm run test:e2e
 ```
 
-The crawl is billed to the key's account (at most 5 page fetches), and it counts against the account's running crawls; when the account has too many crawls running, the test waits and retries for up to 5 minutes.
+The crawl is billed to the key's account (at most 5 page fetches), and it counts against the account's limit of active jobs (3 by default), shared with its Batch jobs. When the account has reached that limit, the test waits and retries for up to 5 minutes.
 
 Pull requests and issues are welcome.
 

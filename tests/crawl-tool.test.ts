@@ -4,7 +4,11 @@ import { z } from "zod";
 import { registerCrawlTools } from "../src/tools/crawl.ts";
 
 type Handler = (p: unknown) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
-type Config = { inputSchema: z.ZodRawShape; annotations: { destructiveHint: boolean; readOnlyHint: boolean } };
+type Config = {
+  description: string;
+  inputSchema: z.ZodRawShape;
+  annotations: { destructiveHint: boolean; readOnlyHint: boolean; idempotentHint?: boolean };
+};
 
 function register() {
   const handlers: Record<string, Handler> = {};
@@ -45,7 +49,7 @@ const crawl = (status = "running") => ({
   created_at: "2026-10-08T00:00:00Z",
 });
 
-test("registers the seven crawl tools, with only crawl_stop destructive", () => {
+test("registers the seven crawl tools as Beta, with only crawl_stop destructive and idempotent", () => {
   const { configs } = register();
   assert.deepEqual(Object.keys(configs).sort(), [
     "crawl_content",
@@ -58,7 +62,9 @@ test("registers the seven crawl tools, with only crawl_stop destructive", () => 
   ]);
   for (const [name, c] of Object.entries(configs)) {
     assert.equal(c.annotations.destructiveHint, name === "crawl_stop", name);
+    assert.ok(c.description.startsWith("Beta: "), name);
   }
+  assert.equal(configs.crawl_stop.annotations.idempotentHint, true);
 });
 
 test("crawl_create's output_format accepts only html", () => {
@@ -128,7 +134,49 @@ test("crawl_create surfaces 403 REQS008 as CRAWL_NOT_ENABLED", async () => {
   assert.equal(out.isError, true);
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.code, "CRAWL_NOT_ENABLED");
+  assert.equal(body.server_code, "REQS008");
   assert.match(body.message, /Crawl is not enabled for this account/);
+  assert.equal(body.crawl_id, undefined, "nothing was created");
+});
+
+test("crawl_create with wait returns the running crawl, not an error, when the wait runs out", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    (_u, init) => jsonResponse(crawl("running"), init?.method === "POST" ? 202 : 200),
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, wait: true, wait_timeout_ms: 1000 })
+  );
+  assert.equal(out.isError, undefined);
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.crawl_id, "c_1");
+  assert.equal(body.status, "running");
+  assert.match(body.note, /call crawl_wait again/i);
+});
+
+test("crawl_create with wait carries crawl_id when the wait fails after the create", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    (_u, init) =>
+      init?.method === "POST"
+        ? jsonResponse(crawl("running"), 202)
+        : jsonResponse({ code: "internal_error", title: "Internal error", status: 500 }, 500),
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, wait: true })
+  );
+  assert.equal(out.isError, true);
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.code, "CRAWL_FAILED");
+  assert.equal(body.server_code, "internal_error");
+  assert.equal(body.crawl_id, "c_1");
+});
+
+test("crawl_create without wait returns the crawl with no note", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse(crawl("running"), 202),
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.crawl_id, "c_1");
+  assert.equal(body.note, undefined);
 });
 
 test("crawl_status returns status and coverage without results", async () => {
@@ -148,7 +196,7 @@ test("crawl_status returns status and coverage without results", async () => {
   assert.match(urls[0], /\/crawls\/c_1\?limit=1$/);
 });
 
-test("crawl_results flags a running crawl as partial and adds content_id", async () => {
+test("crawl_results flags a running crawl as partial and passes rows through as the API sent them", async () => {
   const { handlers } = register();
   let calls = 0;
   const out = await withFetch(
@@ -175,8 +223,11 @@ test("crawl_results flags a running crawl as partial and adds content_id", async
   assert.equal(body.partial, true);
   assert.equal(body.next_cursor, "cur2");
   assert.equal(body.count, 2);
-  assert.equal(body.results[0].content_id, "ct_9");
-  assert.equal(body.results[1].content_id, undefined);
+  assert.deepEqual(body.results[0], {
+    url: "https://example.com/product/1",
+    content_status: "fetched",
+    content_url: "/v1/crawls/c_1/contents/ct_9",
+  });
   assert.match(body.note, /still running/);
 });
 
@@ -209,13 +260,23 @@ test("crawl_content takes a content_url, returns the HTML, and cuts it at max_ch
 
   const full = await withFetch(
     () => new Response(html, { status: 200, headers: { "content-type": "text/html" } }),
-    () => handlers.crawl_content({ crawl_id: "c_1", content_id: "ct_9" })
+    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1/contents/ct_9" })
   );
-  assert.equal(full.content.length, 1);
+  assert.equal(full.content.length, 1, "5013 characters fit under the 20000 default");
   assert.equal(full.content[0].text, html);
 });
 
-test("crawl_content without ids is an INVALID_USAGE error, with no request", async () => {
+test("crawl_content cuts at 20000 characters by default", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => new Response("x".repeat(25_000), { status: 200, headers: { "content-type": "text/html" } }),
+    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1/contents/ct_9" })
+  );
+  assert.equal(out.content[0].text.length, 20_000);
+  assert.match(out.content[1].text, /returned 20000 of 25000/);
+});
+
+test("crawl_content with a content_url it cannot read is an INVALID_USAGE error, with no request", async () => {
   const { handlers } = register();
   let called = false;
   const out = await withFetch(
@@ -223,7 +284,7 @@ test("crawl_content without ids is an INVALID_USAGE error, with no request", asy
       called = true;
       return jsonResponse({});
     },
-    () => handlers.crawl_content({ crawl_id: "c_1" })
+    () => handlers.crawl_content({ content_url: "/v1/crawls/c_1" })
   );
   assert.equal(out.isError, true);
   assert.equal(JSON.parse(out.content[0].text).code, "INVALID_USAGE");

@@ -3,7 +3,8 @@
  * Auth via X-API-Key header. Errors are application/problem+json (RFC 9457).
  *
  * A crawl follows the links on each page up to `depth` and stays on the start URL's
- * domain. `output_format` is `html` (each kept URL's page is stored) or absent (URLs only).
+ * registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
+ * is stored) or absent (URLs only).
  */
 
 export const DEFAULT_CRAWL_API_BASE = "https://api.zenrows.com/v1";
@@ -94,24 +95,42 @@ export class CrawlError extends Error {
   code: string;
   status?: number;
   detail?: string;
+  /** The problem+json `code` the server sent, if any. */
+  serverCode?: string;
   /** Seconds to wait before retrying, from Retry-After on a 429. */
   retryAfter?: number;
 
-  constructor(opts: { code: string; message: string; status?: number; detail?: string; retryAfter?: number }) {
+  constructor(opts: {
+    code: string;
+    message: string;
+    status?: number;
+    detail?: string;
+    serverCode?: string;
+    retryAfter?: number;
+  }) {
     super(opts.message);
     this.name = "CrawlError";
     this.code = opts.code;
     this.status = opts.status;
     this.detail = opts.detail;
+    this.serverCode = opts.serverCode;
     this.retryAfter = opts.retryAfter;
   }
 
-  toJSON(): { code: string; message: string; status?: number; detail?: string; retry_after?: number } {
+  toJSON(): {
+    code: string;
+    message: string;
+    status?: number;
+    detail?: string;
+    server_code?: string;
+    retry_after?: number;
+  } {
     return {
       code: this.code,
       message: this.message,
       status: this.status,
       detail: this.detail,
+      ...(this.serverCode ? { server_code: this.serverCode } : {}),
       ...(this.retryAfter !== undefined ? { retry_after: this.retryAfter } : {}),
     };
   }
@@ -192,88 +211,56 @@ export function problemToError(
   } catch {
     // non-JSON — fall through
   }
-  const serverCode = problem.code ?? "";
+  const serverCode = problem.code || undefined;
   const detail = problem.detail || problem.title || body.slice(0, 240) || `HTTP ${status}`;
   const cause = `HTTP ${status}${serverCode ? ` (${serverCode})` : ""} for ${method} ${path}: ${detail}`;
+  const error = (code: string, message: string, retryAfter?: number) =>
+    new CrawlError({ code, message, status, detail: cause, serverCode, retryAfter });
 
   if (status === 403 && serverCode === "REQS008") {
-    return new CrawlError({
-      code: "CRAWL_NOT_ENABLED",
-      message:
-        "Crawl is not enabled for this account. Do not retry. Ask the user to request Crawl access from Zenrows; meanwhile, scrape the pages one by one.",
-      status,
-      detail: cause,
-    });
-  }
-  if (status === 403) {
-    return new CrawlError({
-      code: "CRAWL_ACCESS_DENIED",
-      message: "The Crawl API rejected this request (access denied).",
-      status,
-      detail: cause,
-    });
+    return error(
+      "CRAWL_NOT_ENABLED",
+      "Crawl is not enabled for this account. Do not retry. Ask the user to request Crawl access from Zenrows; meanwhile, scrape the pages one by one."
+    );
   }
   if (status === 401) {
-    return new CrawlError({
-      code: "AUTH_INVALID",
-      message: "Zenrows rejected the API key for the Crawl API.",
-      status,
-      detail: cause,
-    });
+    return error("AUTH_INVALID", "Zenrows rejected the API key for the Crawl API.");
   }
   if (status === 404) {
-    const content = serverCode === "content_not_found";
-    return new CrawlError({
-      code: content ? "CRAWL_CONTENT_NOT_FOUND" : "CRAWL_NOT_FOUND",
-      message: content
-        ? "No page stored for this content id: the crawl ran without output_format, or the page is not fetched yet, or its fetch failed. Check content_status in crawl_results."
-        : "Crawl not found for this account. Check the crawl_id (crawl_list shows the account's crawls).",
-      status,
-      detail: cause,
-    });
+    return serverCode === "content_not_found"
+      ? error(
+          "CRAWL_CONTENT_NOT_FOUND",
+          "No page stored for this content_url: the crawl ran without output_format, or the page is not fetched yet, or its fetch failed. Check content_status in crawl_results."
+        )
+      : error(
+          "CRAWL_NOT_FOUND",
+          "Crawl not found for this account. Check the crawl_id (crawl_list shows the account's crawls)."
+        );
   }
   if (status === 429) {
     const seconds = Number(retryAfterHeader);
-    return new CrawlError({
-      code: "CRAWL_TOO_MANY_CRAWLS",
-      message:
-        "This account has too many crawls running. Wait for one to finish, or stop one with crawl_stop, then retry after retry_after seconds.",
-      status,
-      detail: cause,
-      retryAfter: Number.isFinite(seconds) && seconds > 0 ? seconds : undefined,
-    });
+    return error(
+      "CRAWL_TOO_MANY_CRAWLS",
+      "The account has reached its limit of active jobs (3 by default), shared with its Batch jobs. Wait for a crawl or Batch job to finish, or stop one with crawl_stop or batch_cancel, then retry after retry_after seconds.",
+      Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+    );
   }
   if (status === 402 && serverCode === "AUTH014") {
-    return new CrawlError({
-      code: "CRAWL_KEY_CAP_REACHED",
-      message:
-        "This API key reached one of its credit caps, so the Crawl API refused the request. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail).",
-      status,
-      detail: cause,
-    });
+    return error(
+      "CRAWL_KEY_CAP_REACHED",
+      "This API key reached one of its credit caps, so the Crawl API refused the request. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail)."
+    );
   }
   if (status === 402) {
-    return new CrawlError({
-      code: "CRAWL_QUOTA_EXCEEDED",
-      message: "Subscription has no credit available for the Crawl API.",
-      status,
-      detail: cause,
-    });
+    return error("CRAWL_QUOTA_EXCEEDED", "Subscription has no credit available for the Crawl API.");
   }
   if (status === 400 || status === 422) {
-    return new CrawlError({
-      code: "CRAWL_INVALID_REQUEST",
-      message: `Crawl rejected the request${serverCode ? ` (${serverCode})` : ""}: ${detail}`,
-      status,
-      detail: cause,
-    });
+    return error(
+      "CRAWL_INVALID_REQUEST",
+      `Crawl rejected the request${serverCode ? ` (${serverCode})` : ""}: ${detail}`
+    );
   }
-  return new CrawlError({
-    code: "CRAWL_FAILED",
-    message: `Crawl request failed (HTTP ${status}).`,
-    status,
-    detail: cause,
-  });
+  return error("CRAWL_FAILED", `Crawl request failed (HTTP ${status}).`);
 }
 
 interface CallOpts {
@@ -324,6 +311,12 @@ export function parseContentUrl(contentUrl: string): { crawlId: string; contentI
   return { crawlId: decodeURIComponent(m[1]), contentId: decodeURIComponent(m[2]) };
 }
 
+/** Default cap on the results one read returns, to keep a tool answer small. */
+export const DEFAULT_MAX_RESULTS = 100;
+
+/** Default wait, below the 60 s after which many MCP clients cancel a tool call. */
+export const DEFAULT_WAIT_MS = 50_000;
+
 export interface ResultsRead {
   results: CrawlResult[];
   /** Pass back as cursor to continue. Null once the crawl ended and every result was read. */
@@ -342,7 +335,7 @@ export async function readResults(
   id: string,
   opts: CallOpts & { cursor?: string; maxResults?: number }
 ): Promise<ResultsRead> {
-  const max = opts.maxResults ?? 1000;
+  const max = opts.maxResults ?? DEFAULT_MAX_RESULTS;
   const results: CrawlResult[] = [];
   let cursor = opts.cursor;
   for (;;) {
@@ -358,26 +351,18 @@ export async function readResults(
 }
 
 /**
- * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal.
- * On timeout raises CRAWL_WAIT_TIMEOUT; the crawl keeps running.
+ * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal or the
+ * wait runs out. Running out is not an error: it returns the crawl, still running.
  */
 export async function waitForCrawl(
   id: string,
   opts: CallOpts & { pollTimeoutMs?: number; pollDelayMs?: number }
 ): Promise<Crawl> {
-  const total = opts.pollTimeoutMs ?? 600_000;
-  const deadline = Date.now() + total;
+  const deadline = Date.now() + (opts.pollTimeoutMs ?? DEFAULT_WAIT_MS);
   let delay = opts.pollDelayMs ?? 2000;
   for (;;) {
     const crawl = await getCrawl(id, { ...opts, limit: 1 });
-    if (isTerminal(crawl.status)) return withoutResults(crawl);
-    if (Date.now() + delay > deadline) {
-      throw new CrawlError({
-        code: "CRAWL_WAIT_TIMEOUT",
-        message: `Timed out waiting for crawl ${id} to finish. It is still running: call crawl_wait again, read partial results with crawl_results, or stop it with crawl_stop.`,
-        detail: `The crawl did not reach a terminal state within ${Math.round(total / 1000)}s.`,
-      });
-    }
+    if (isTerminal(crawl.status) || Date.now() + delay > deadline) return withoutResults(crawl);
     await new Promise<void>((r) => setTimeout(r, delay));
     delay = Math.min(delay * 1.5, 15_000);
   }
