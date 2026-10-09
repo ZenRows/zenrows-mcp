@@ -51,7 +51,7 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
   const tools = (await client.listTools()).tools.map((t) => t.name);
   for (const name of [
     "crawl_create",
-    "crawl_status",
+    "crawl_get",
     "crawl_results",
     "crawl_content",
     "crawl_list",
@@ -72,7 +72,7 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
       max_pages: 5,
       ...(include ? { include_patterns: [include] } : {}),
       output_format: "html",
-      wait: true,
+      follow: true,
     });
     const b = body(out);
     if (out.isError && b.code === "CRAWL_TOO_MANY_CRAWLS" && Date.now() < deadline) {
@@ -125,11 +125,13 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
   assert.equal(body(stop).status, "completed", "stop on an ended crawl answers as it ended");
   console.log(`crawl_stop: ${body(stop).status}`);
 
-  const status = await call("crawl_status", { crawl_id: crawlId });
-  assert.equal(body(status).status, "completed");
+  const got = body(await call("crawl_get", { crawl_id: crawlId })) as { status: string; results: unknown[] };
+  assert.equal(got.status, "completed");
+  assert.equal(got.results.length, r.count, "crawl_get holds the same page of results");
 
-  const missing = await call("crawl_status", { crawl_id: "c_does_not_exist" });
+  const missing = await call("crawl_get", { crawl_id: "c_does_not_exist" });
   assert.equal(missing.isError, true);
   assert.equal(body(missing).code, "CRAWL_NOT_FOUND");
-  console.log(`crawl_status(bad id): ${body(missing).code}`);
+  assert.equal(body(missing).crawl_id, "c_does_not_exist");
+  console.log(`crawl_get(bad id): ${body(missing).code}`);
 });

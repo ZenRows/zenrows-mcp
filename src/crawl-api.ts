@@ -254,6 +254,12 @@ export function problemToError(
   if (status === 402) {
     return error("CRAWL_QUOTA_EXCEEDED", "Subscription has no credit available for the Crawl API.");
   }
+  if (status === 409) {
+    return error(
+      "CRAWL_REQUEST_IN_FLIGHT",
+      "A request with the same idempotency key is still in progress. Retry after the first request finishes."
+    );
+  }
   if (status === 400 || status === 422) {
     return error(
       "CRAWL_INVALID_REQUEST",
@@ -311,54 +317,52 @@ export function parseContentUrl(contentUrl: string): { crawlId: string; contentI
   return { crawlId: decodeURIComponent(m[1]), contentId: decodeURIComponent(m[2]) };
 }
 
-/** Default cap on the results one read returns, to keep a tool answer small. */
-export const DEFAULT_MAX_RESULTS = 100;
+/** Default page size for crawl_get and cap for crawl_results, to keep a tool answer small. */
+export const DEFAULT_LIMIT = 100;
 
-/** Default wait, below the 60 s after which many MCP clients cancel a tool call. */
-export const DEFAULT_WAIT_MS = 50_000;
+/** Default wait in seconds, below the 60 s after which many MCP clients cancel a tool call. */
+export const DEFAULT_WAIT_SECONDS = 50;
 
 export interface ResultsRead {
   results: CrawlResult[];
   /** Pass back as cursor to continue. Null once the crawl ended and every result was read. */
   next_cursor: string | null;
   status: string;
-  /** True when the cap stopped the read before the results ran out. */
-  truncated: boolean;
 }
 
 /**
  * Reads results from `cursor` on, following next_cursor until it is null (crawl ended,
  * all read), a page comes back empty (a running crawl has nothing new yet), or
- * `maxResults` is reached.
+ * `limit` results are read.
  */
 export async function readResults(
   id: string,
-  opts: CallOpts & { cursor?: string; maxResults?: number }
+  opts: CallOpts & { cursor?: string; limit?: number }
 ): Promise<ResultsRead> {
-  const max = opts.maxResults ?? DEFAULT_MAX_RESULTS;
+  const limit = opts.limit ?? DEFAULT_LIMIT;
   const results: CrawlResult[] = [];
   let cursor = opts.cursor;
   for (;;) {
-    const page = await getCrawl(id, { ...opts, cursor, limit: Math.min(max - results.length, 1000) });
+    const page = await getCrawl(id, { ...opts, cursor, limit: limit - results.length });
     const rows = page.results ?? [];
     results.push(...rows);
     const next = page.next_cursor ?? null;
-    if (next === null) return { results, next_cursor: null, status: page.status, truncated: false };
-    if (results.length >= max) return { results, next_cursor: next, status: page.status, truncated: true };
-    if (rows.length === 0) return { results, next_cursor: next, status: page.status, truncated: false };
+    if (next === null || results.length >= limit || rows.length === 0) {
+      return { results, next_cursor: next, status: page.status };
+    }
     cursor = next;
   }
 }
 
 /**
- * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal or the
- * wait runs out. Running out is not an error: it returns the crawl, still running.
+ * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal or
+ * `timeout` seconds run out. Running out is not an error: it returns the crawl, still running.
  */
 export async function waitForCrawl(
   id: string,
-  opts: CallOpts & { pollTimeoutMs?: number; pollDelayMs?: number }
+  opts: CallOpts & { timeout?: number; pollDelayMs?: number }
 ): Promise<Crawl> {
-  const deadline = Date.now() + (opts.pollTimeoutMs ?? DEFAULT_WAIT_MS);
+  const deadline = Date.now() + (opts.timeout ?? DEFAULT_WAIT_SECONDS) * 1000;
   let delay = opts.pollDelayMs ?? 2000;
   for (;;) {
     const crawl = await getCrawl(id, { ...opts, limit: 1 });
@@ -368,8 +372,8 @@ export async function waitForCrawl(
   }
 }
 
-/** The crawl without its page of results, as status reads show it. */
-export function withoutResults(crawl: Crawl | CrawlWithResults): Crawl {
+/** The crawl without its page of results. */
+function withoutResults(crawl: Crawl | CrawlWithResults): Crawl {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { results, next_cursor, ...rest } = crawl as CrawlWithResults;
   return rest;

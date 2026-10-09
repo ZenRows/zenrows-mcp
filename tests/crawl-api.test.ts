@@ -147,7 +147,7 @@ test("429 too_many_crawls maps to CRAWL_TOO_MANY_CRAWLS and carries Retry-After"
   );
 });
 
-test("401, 402 and other 403s map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED, CRAWL_KEY_CAP_REACHED and CRAWL_FAILED", async () => {
+test("401, 409, 402 and other 403s map to AUTH_INVALID, CRAWL_REQUEST_IN_FLIGHT, CRAWL_QUOTA_EXCEEDED, CRAWL_KEY_CAP_REACHED and CRAWL_FAILED", async () => {
   const respond = (status: number, code?: string) =>
     (async () => jsonResponse({ code, title: "x", status }, status)) as typeof fetch;
   const codeOf = async (fetchImpl: typeof fetch) => {
@@ -158,6 +158,7 @@ test("401, 402 and other 403s map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED, CRAWL_K
     }
   };
   assert.equal(await codeOf(respond(401)), "AUTH_INVALID");
+  assert.equal(await codeOf(respond(409, "idempotency_request_in_flight")), "CRAWL_REQUEST_IN_FLIGHT");
   assert.equal(await codeOf(respond(402, "AUTH002")), "CRAWL_QUOTA_EXCEEDED");
   assert.equal(await codeOf(respond(402, "AUTH014")), "CRAWL_KEY_CAP_REACHED");
   assert.equal(await codeOf(respond(500)), "CRAWL_FAILED");
@@ -237,7 +238,6 @@ test("readResults follows next_cursor and stops when it is null", async () => {
     ["https://example.com/product/1", "https://example.com/product/2", "https://example.com/product/3"]
   );
   assert.equal(read.next_cursor, null);
-  assert.equal(read.truncated, false);
   assert.deepEqual(cursors, [null, "p2"]);
 });
 
@@ -256,7 +256,7 @@ test("readResults on a running crawl stops at the first empty page and keeps the
   assert.equal(calls, 2);
 });
 
-test("readResults stops at maxResults and asks only for what is left", async () => {
+test("readResults stops at limit and asks only for what is left", async () => {
   const limits: Array<string | null> = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
     limits.push(new URL(String(input)).searchParams.get("limit"));
@@ -266,9 +266,8 @@ test("readResults stops at maxResults and asks only for what is left", async () 
       next_cursor: "more",
     });
   }) as typeof fetch;
-  const read = await readResults("c_1", { apiKey: "k", fetchImpl, maxResults: 3 });
+  const read = await readResults("c_1", { apiKey: "k", fetchImpl, limit: 3 });
   assert.equal(read.results.length, 4);
-  assert.equal(read.truncated, true);
   assert.equal(read.next_cursor, "more");
   assert.deepEqual(limits, ["3", "1"]);
 });
@@ -297,7 +296,7 @@ test("waitForCrawl returns the running crawl when the wait runs out, and does no
     methods.push(String(init?.method));
     return jsonResponse({ ...crawl("running"), results: [], next_cursor: "x" });
   }) as typeof fetch;
-  const out = await waitForCrawl("c_1", { apiKey: "k", fetchImpl, pollTimeoutMs: 30, pollDelayMs: 10 });
+  const out = await waitForCrawl("c_1", { apiKey: "k", fetchImpl, timeout: 0.03, pollDelayMs: 10 });
   assert.equal(out.status, "running");
   assert.equal(out.crawl_id, "c_1");
   assert.ok(methods.every((m) => m === "GET"));
