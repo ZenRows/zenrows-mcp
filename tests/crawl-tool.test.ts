@@ -54,14 +54,15 @@ test("registers the seven crawl tools as Beta, with only crawl_stop destructive 
   assert.deepEqual(Object.keys(configs).sort(), [
     "crawl_content",
     "crawl_create",
+    "crawl_get",
     "crawl_list",
     "crawl_results",
-    "crawl_status",
     "crawl_stop",
     "crawl_wait",
   ]);
   for (const [name, c] of Object.entries(configs)) {
     assert.equal(c.annotations.destructiveHint, name === "crawl_stop", name);
+    assert.equal(c.annotations.readOnlyHint, !["crawl_create", "crawl_stop"].includes(name), name);
     assert.ok(c.description.startsWith("Beta: "), name);
   }
   assert.equal(configs.crawl_stop.annotations.idempotentHint, true);
@@ -139,11 +140,11 @@ test("crawl_create surfaces 403 REQS008 as CRAWL_NOT_ENABLED", async () => {
   assert.equal(body.crawl_id, undefined, "nothing was created");
 });
 
-test("crawl_create with wait returns the running crawl, not an error, when the wait runs out", async () => {
+test("crawl_create with follow returns the running crawl, not an error, when the timeout runs out", async () => {
   const { handlers } = register();
   const out = await withFetch(
     (_u, init) => jsonResponse(crawl("running"), init?.method === "POST" ? 202 : 200),
-    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, wait: true, wait_timeout_ms: 1000 })
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, follow: true, timeout: 1 })
   );
   assert.equal(out.isError, undefined);
   const body = JSON.parse(out.content[0].text);
@@ -152,14 +153,14 @@ test("crawl_create with wait returns the running crawl, not an error, when the w
   assert.match(body.note, /call crawl_wait again/i);
 });
 
-test("crawl_create with wait carries crawl_id when the wait fails after the create", async () => {
+test("crawl_create with follow carries crawl_id when the wait fails after the create", async () => {
   const { handlers } = register();
   const out = await withFetch(
     (_u, init) =>
       init?.method === "POST"
         ? jsonResponse(crawl("running"), 202)
         : jsonResponse({ code: "internal_error", title: "Internal error", status: 500 }, 500),
-    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, wait: true })
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 1, follow: true })
   );
   assert.equal(out.isError, true);
   const body = JSON.parse(out.content[0].text);
@@ -168,7 +169,7 @@ test("crawl_create with wait carries crawl_id when the wait fails after the crea
   assert.equal(body.crawl_id, "c_1");
 });
 
-test("crawl_create without wait returns the crawl with no note", async () => {
+test("crawl_create without follow returns the crawl with no note", async () => {
   const { handlers } = register();
   const out = await withFetch(
     () => jsonResponse(crawl("running"), 202),
@@ -179,21 +180,69 @@ test("crawl_create without wait returns the crawl with no note", async () => {
   assert.equal(body.note, undefined);
 });
 
-test("crawl_status returns status and coverage without results", async () => {
+test("crawl_get returns one API page with 100 results by default, and passes cursor and limit", async () => {
   const { handlers } = register();
   const urls: string[] = [];
+  const page = { ...crawl("running"), results: [{ url: "https://example.com/p/1" }], next_cursor: "x" };
   const out = await withFetch(
     (u) => {
       urls.push(u);
-      return jsonResponse({ ...crawl("running"), results: [{ url: "https://example.com/p/1" }], next_cursor: "x" });
+      return jsonResponse(page);
     },
-    () => handlers.crawl_status({ crawl_id: "c_1" })
+    async () => {
+      const first = await handlers.crawl_get({ crawl_id: "c_1" });
+      await handlers.crawl_get({ crawl_id: "c_1", cursor: "x", limit: 5 });
+      return first;
+    }
   );
+  assert.deepEqual(JSON.parse(out.content[0].text), { ok: true, ...page });
+  assert.match(urls[0], /\/crawls\/c_1\?limit=100$/);
+  assert.match(urls[1], /\/crawls\/c_1\?cursor=x&limit=5$/);
+});
+
+test("crawl_get carries crawl_id on an error", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ code: "crawl_not_found", title: "Not found", status: 404 }, 404),
+    () => handlers.crawl_get({ crawl_id: "c_missing" })
+  );
+  assert.equal(out.isError, true);
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.code, "CRAWL_NOT_FOUND");
+  assert.equal(body.server_code, "crawl_not_found");
+  assert.equal(body.crawl_id, "c_missing");
+});
+
+test("crawl_wait takes timeout in seconds and returns the running crawl when it runs out", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ ...crawl("running"), results: [], next_cursor: "x" }),
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+  );
+  assert.equal(out.isError, undefined);
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.status, "running");
-  assert.equal(body.coverage.items_found, 2);
-  assert.equal(body.crawl.results, undefined);
-  assert.match(urls[0], /\/crawls\/c_1\?limit=1$/);
+  assert.match(body.note, /call crawl_wait again/i);
+});
+
+test("crawl_results takes cursor and limit, and caps limit at 10000", async () => {
+  const { handlers, configs } = register();
+  const schema = z.object(configs.crawl_results.inputSchema);
+  assert.equal(schema.safeParse({ crawl_id: "c_1", limit: 10_000 }).success, true);
+  assert.equal(schema.safeParse({ crawl_id: "c_1", limit: 10_001 }).success, false);
+  const urls: string[] = [];
+  await withFetch(
+    (u) => {
+      urls.push(u);
+      return jsonResponse({ ...crawl("completed"), results: [], next_cursor: null });
+    },
+    async () => {
+      await handlers.crawl_results({ crawl_id: "c_1" });
+      await handlers.crawl_results({ crawl_id: "c_1", cursor: "cur", limit: 7 });
+    }
+  );
+  assert.match(urls[0], /\/crawls\/c_1\?limit=100$/);
+  assert.match(urls[1], /\/crawls\/c_1\?cursor=cur&limit=7$/);
 });
 
 test("crawl_results flags a running crawl as partial and passes rows through as the API sent them", async () => {
