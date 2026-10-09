@@ -91,6 +91,7 @@ test("403 REQS008 maps to CRAWL_NOT_ENABLED with a message saying Crawl is not e
       assert.equal(e.status, 403);
       assert.match(e.message, /Crawl is not enabled for this account/);
       assert.match(e.detail ?? "", /REQS008/);
+      assert.equal(e.toJSON().server_code, "REQS008");
       return true;
     }
   );
@@ -139,12 +140,14 @@ test("429 too_many_crawls maps to CRAWL_TOO_MANY_CRAWLS and carries Retry-After"
       assert.equal(e.code, "CRAWL_TOO_MANY_CRAWLS");
       assert.equal(e.retryAfter, 30);
       assert.equal(e.toJSON().retry_after, 30);
+      assert.equal(e.toJSON().server_code, "too_many_crawls");
+      assert.match(e.message, /limit of active jobs \(3 by default\), shared with its Batch jobs/);
       return true;
     }
   );
 });
 
-test("401 and 402 map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED and CRAWL_KEY_CAP_REACHED", async () => {
+test("401, 402 and other 403s map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED, CRAWL_KEY_CAP_REACHED and CRAWL_FAILED", async () => {
   const respond = (status: number, code?: string) =>
     (async () => jsonResponse({ code, title: "x", status }, status)) as typeof fetch;
   const codeOf = async (fetchImpl: typeof fetch) => {
@@ -158,6 +161,30 @@ test("401 and 402 map to AUTH_INVALID, CRAWL_QUOTA_EXCEEDED and CRAWL_KEY_CAP_RE
   assert.equal(await codeOf(respond(402, "AUTH002")), "CRAWL_QUOTA_EXCEEDED");
   assert.equal(await codeOf(respond(402, "AUTH014")), "CRAWL_KEY_CAP_REACHED");
   assert.equal(await codeOf(respond(500)), "CRAWL_FAILED");
+  assert.equal(await codeOf(respond(403, "AUTH001")), "CRAWL_FAILED");
+});
+
+test("an error without a server code carries no server_code", async () => {
+  const fetchImpl = (async () => new Response("bad gateway", { status: 502 })) as typeof fetch;
+  await assert.rejects(
+    () => listCrawls({ apiKey: "k", fetchImpl }),
+    (e: unknown) => {
+      assert.ok(e instanceof CrawlError);
+      assert.equal(e.code, "CRAWL_FAILED");
+      assert.equal("server_code" in e.toJSON(), false);
+      return true;
+    }
+  );
+});
+
+test("readResults returns at most 100 results by default", async () => {
+  const limits: Array<string | null> = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    limits.push(new URL(String(input)).searchParams.get("limit"));
+    return jsonResponse({ ...crawl("completed"), results: [], next_cursor: null });
+  }) as typeof fetch;
+  await readResults("c_1", { apiKey: "k", fetchImpl });
+  assert.deepEqual(limits, ["100"]);
 });
 
 test("a network failure becomes BACKEND_UNAVAILABLE", async () => {
@@ -264,16 +291,15 @@ test("waitForCrawl polls with limit=1 until terminal and drops the results page"
   assert.deepEqual(limits, ["1", "1", "1"]);
 });
 
-test("waitForCrawl times out with CRAWL_WAIT_TIMEOUT and does not stop the crawl", async () => {
+test("waitForCrawl returns the running crawl when the wait runs out, and does not stop it", async () => {
   const methods: string[] = [];
   const fetchImpl = (async (_i: RequestInfo | URL, init?: RequestInit) => {
     methods.push(String(init?.method));
     return jsonResponse({ ...crawl("running"), results: [], next_cursor: "x" });
   }) as typeof fetch;
-  await assert.rejects(
-    () => waitForCrawl("c_1", { apiKey: "k", fetchImpl, pollTimeoutMs: 30, pollDelayMs: 10 }),
-    (e: unknown) => e instanceof CrawlError && e.code === "CRAWL_WAIT_TIMEOUT"
-  );
+  const out = await waitForCrawl("c_1", { apiKey: "k", fetchImpl, pollTimeoutMs: 30, pollDelayMs: 10 });
+  assert.equal(out.status, "running");
+  assert.equal(out.crawl_id, "c_1");
   assert.ok(methods.every((m) => m === "GET"));
 });
 
