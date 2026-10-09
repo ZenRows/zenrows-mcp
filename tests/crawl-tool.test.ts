@@ -175,9 +175,12 @@ test("crawl_create without follow returns the crawl with no note", async () => {
     () => jsonResponse(crawl("running"), 202),
     () => handlers.crawl_create({ url: "https://example.com/", depth: 1 })
   );
-  const body = JSON.parse(out.content[0].text);
-  assert.equal(body.crawl_id, "c_1");
-  assert.equal(body.note, undefined);
+  assert.deepEqual(JSON.parse(out.content[0].text), {
+    ok: true,
+    crawl_id: "c_1",
+    status: "running",
+    crawl: crawl("running"),
+  });
 });
 
 test("crawl_get returns one API page with 100 results by default, and passes cursor and limit", async () => {
@@ -195,7 +198,15 @@ test("crawl_get returns one API page with 100 results by default, and passes cur
       return first;
     }
   );
-  assert.deepEqual(JSON.parse(out.content[0].text), { ok: true, ...page });
+  const { results, next_cursor, ...rest } = page;
+  assert.deepEqual(JSON.parse(out.content[0].text), {
+    ok: true,
+    crawl_id: "c_1",
+    status: "running",
+    crawl: rest,
+    results,
+    next_cursor,
+  });
   assert.match(urls[0], /\/crawls\/c_1\?limit=100$/);
   assert.match(urls[1], /\/crawls\/c_1\?cursor=x&limit=5$/);
 });
@@ -221,6 +232,7 @@ test("crawl_wait takes timeout in seconds and returns the running crawl when it 
   );
   assert.equal(out.isError, undefined);
   const body = JSON.parse(out.content[0].text);
+  assert.deepEqual(Object.keys(body), ["ok", "crawl_id", "status", "crawl", "note"]);
   assert.equal(body.status, "running");
   assert.match(body.note, /call crawl_wait again/i);
 });
@@ -351,7 +363,12 @@ test("crawl_stop POSTs stop and returns the status", async () => {
     () => handlers.crawl_stop({ crawl_id: "c_1" })
   );
   assert.match(seen[0], /^POST .*\/crawls\/c_1\/stop$/);
-  assert.equal(JSON.parse(out.content[0].text).status, "stopped");
+  assert.deepEqual(JSON.parse(out.content[0].text), {
+    ok: true,
+    crawl_id: "c_1",
+    status: "stopped",
+    crawl: { crawl_id: "c_1", status: "stopped", stop_reason: "user" },
+  });
 });
 
 test("crawl_list passes cursor and limit and reports next_cursor null on the last page", async () => {

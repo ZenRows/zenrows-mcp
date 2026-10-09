@@ -123,6 +123,8 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 }
 ```
 
+**Optional:** `ZENROWS_CRAWL_API_BASE` sets the Crawl API base URL for the `crawl_*` tools (default `https://api.zenrows.com/v1`). Set it only to point those tools at another deployment.
+
 The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
 
 ---
