@@ -289,12 +289,12 @@ While the crawl runs the list is partial (partial=true): call again later with t
       annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
 
-Pass crawl_id and content: a content id, or content_url from a crawl_results row. Returns raw HTML,
+Pass crawl_id and content_id: a content id, or content_url from a crawl_results row. Returns raw HTML,
 cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
 markdown version of a page, use scrape on its URL instead.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
-        content: z
+        content_id: z
           .string()
           .min(1)
           .describe("A content id (ct_…), or content_url from a crawl_results row; its last path segment is the id"),
@@ -307,8 +307,8 @@ markdown version of a page, use scrape on its URL instead.`,
           .describe(`Max characters of HTML to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
       },
     },
-    async ({ crawl_id, content, max_chars }) => {
-      const contentId = contentIdOf(content);
+    async ({ crawl_id, content_id, max_chars }) => {
+      const contentId = contentIdOf(content_id);
       if (!contentId) {
         return err({ code: "INVALID_USAGE", message: "Pass a content id, or content_url from a crawl_results row." });
       }

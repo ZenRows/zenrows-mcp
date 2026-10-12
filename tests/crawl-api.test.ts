@@ -147,7 +147,7 @@ test("429 too_many_crawls maps to CRAWL_TOO_MANY_CRAWLS and carries Retry-After"
   );
 });
 
-test("401, 409, 402 and other 403s map to AUTH_INVALID, CRAWL_REQUEST_IN_FLIGHT, CRAWL_QUOTA_EXCEEDED, CRAWL_KEY_CAP_REACHED and CRAWL_FAILED", async () => {
+test("401, 409, 402 and other 403s map to AUTH_INVALID, CRAWL_REQUEST_IN_FLIGHT, CRAWL_INSUFFICIENT_CREDITS, CRAWL_KEY_CAP_REACHED and CRAWL_FAILED", async () => {
   const respond = (status: number, code?: string) =>
     (async () => jsonResponse({ code, title: "x", status }, status)) as typeof fetch;
   const codeOf = async (fetchImpl: typeof fetch) => {
@@ -159,8 +159,10 @@ test("401, 409, 402 and other 403s map to AUTH_INVALID, CRAWL_REQUEST_IN_FLIGHT,
   };
   assert.equal(await codeOf(respond(401)), "AUTH_INVALID");
   assert.equal(await codeOf(respond(409, "idempotency_request_in_flight")), "CRAWL_REQUEST_IN_FLIGHT");
-  assert.equal(await codeOf(respond(402, "AUTH002")), "CRAWL_QUOTA_EXCEEDED");
+  assert.equal(await codeOf(respond(402, "AUTH002")), "CRAWL_INSUFFICIENT_CREDITS");
+  assert.equal(await codeOf(respond(402, "insufficient_credits")), "CRAWL_INSUFFICIENT_CREDITS");
   assert.equal(await codeOf(respond(402, "AUTH014")), "CRAWL_KEY_CAP_REACHED");
+  assert.equal(await codeOf(respond(402, "api_key_cap_reached")), "CRAWL_KEY_CAP_REACHED");
   assert.equal(await codeOf(respond(500)), "CRAWL_FAILED");
   assert.equal(await codeOf(respond(403, "AUTH001")), "CRAWL_FAILED");
 });

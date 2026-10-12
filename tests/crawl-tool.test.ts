@@ -412,8 +412,8 @@ test("crawl_content takes a content id or a content_url", async () => {
       return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
     },
     async () => {
-      await handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" });
-      await handlers.crawl_content({ crawl_id: "c_1", content: "/v1/crawls/c_1/contents/ct_9" });
+      await handlers.crawl_content({ crawl_id: "c_1", content_id: "ct_9" });
+      await handlers.crawl_content({ crawl_id: "c_1", content_id: "/v1/crawls/c_1/contents/ct_9" });
     }
   );
   assert.match(urls[0], /\/crawls\/c_1\/contents\/ct_9$/);
@@ -425,12 +425,12 @@ test("crawl_content returns the HTML and cuts it at max_chars", async () => {
   const html = "<html>" + "x".repeat(5000) + "</html>";
   const respond = () => new Response(html, { status: 200, headers: { "content-type": "text/html" } });
   const out = await withFetch(respond, () =>
-    handlers.crawl_content({ crawl_id: "c_1", content: "ct_9", max_chars: 1000 })
+    handlers.crawl_content({ crawl_id: "c_1", content_id: "ct_9", max_chars: 1000 })
   );
   assert.equal(out.content[0].text, html.slice(0, 1000));
   assert.match(out.content[1].text, /truncated: returned 1000 of 5013/);
 
-  const full = await withFetch(respond, () => handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" }));
+  const full = await withFetch(respond, () => handlers.crawl_content({ crawl_id: "c_1", content_id: "ct_9" }));
   assert.equal(full.content.length, 1, "5013 characters fit under the 20000 default");
   assert.equal(full.content[0].text, html);
 });
@@ -439,7 +439,7 @@ test("crawl_content cuts at 20000 characters by default", async () => {
   const { handlers } = register();
   const out = await withFetch(
     () => new Response("x".repeat(25_000), { status: 200, headers: { "content-type": "text/html" } }),
-    () => handlers.crawl_content({ crawl_id: "c_1", content: "ct_9" })
+    () => handlers.crawl_content({ crawl_id: "c_1", content_id: "ct_9" })
   );
   assert.equal(out.content[0].text.length, 20_000);
   assert.match(out.content[1].text, /returned 20000 of 25000/);
@@ -453,7 +453,7 @@ test("crawl_content with no content id in content is an INVALID_USAGE error, wit
       called = true;
       return jsonResponse({});
     },
-    () => handlers.crawl_content({ crawl_id: "c_1", content: "/" })
+    () => handlers.crawl_content({ crawl_id: "c_1", content_id: "/" })
   );
   assert.equal(out.isError, true);
   assert.equal(JSON.parse(out.content[0].text).code, "INVALID_USAGE");

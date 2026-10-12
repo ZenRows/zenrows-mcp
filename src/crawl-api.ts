@@ -300,14 +300,17 @@ export function problemToError(
       retryAfter
     );
   }
-  if (status === 402 && serverCode === "AUTH014") {
+  if (status === 402 && (serverCode === "AUTH014" || serverCode === "api_key_cap_reached")) {
     return error(
       "CRAWL_KEY_CAP_REACHED",
       "This API key reached one of its credit caps, so the Crawl API refused the request. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail)."
     );
   }
   if (status === 402) {
-    return error("CRAWL_QUOTA_EXCEEDED", "Subscription has no credit available for the Crawl API.");
+    return error(
+      "CRAWL_INSUFFICIENT_CREDITS",
+      "This account has no credits left, so the Crawl API refused the request. Add credits, then retry."
+    );
   }
   if (status === 409) {
     return error(

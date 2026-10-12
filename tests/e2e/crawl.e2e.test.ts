@@ -111,7 +111,7 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
 
   const fetched = r.results.find((row) => row.content_status === "fetched");
   assert.ok(fetched?.content_url, "a fetched result with content_url");
-  const content = await call("crawl_content", { crawl_id: crawlId, content: fetched.content_url });
+  const content = await call("crawl_content", { crawl_id: crawlId, content_id: fetched.content_url });
   assert.ok(!content.isError, content.content[0].text);
   const html = content.content[0].text;
   console.log(`crawl_content: ${html.length} chars of HTML`);
