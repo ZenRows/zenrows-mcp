@@ -547,21 +547,27 @@ await liveCheck(
   "crawl_content by content id, then by content_url: the same HTML",
   async () => {
     if (!B) return { status: SKIP, actual: "no html crawl" };
-    const rs = (await call(S, "crawl_results", { crawl_id: B.crawl_id })).data?.results ?? [];
-    const row = rs.find((x) => x.content_url);
-    if (!row)
-      return stopInfo?.status === "stopped"
-        ? {
-            status: SKIP,
-            actual:
-              "the stop cancelled every page fetch, so no page has content to read (see check 20)",
-          }
-        : { status: FAIL, actual: "no result with content_url" };
+    const firstFetched = async (id) =>
+      ((await call(S, "crawl_results", { crawl_id: id })).data?.results ?? []).find(
+        (x) => x.content_url,
+      );
+    // The stop in check 20 can land before any page is fetched. Then read a
+    // one-item html crawl that runs to the end instead.
+    let src = B.crawl_id;
+    let row = await firstFetched(src);
+    if (!row) {
+      const own = await create({ ...base, max_items: 1, output_format: "html" });
+      if (!own.data?.crawl_id) return { status: FAIL, actual: `create: ${H.trim(own.texts.join(" "), 300)}` };
+      await waitEnd(own.data.crawl_id);
+      src = own.data.crawl_id;
+      row = await firstFetched(src);
+    }
+    if (!row) return { status: FAIL, actual: `no result with content_url on ${src}` };
     const a = await call(S, "crawl_content", {
-      crawl_id: B.crawl_id,
+      crawl_id: src,
       content_id: row.content_url.split("/").pop(),
     });
-    const b = await call(S, "crawl_content", { crawl_id: B.crawl_id, content_id: row.content_url });
+    const b = await call(S, "crawl_content", { crawl_id: src, content_id: row.content_url });
     content = a;
     const ok =
       !a.isError && !b.isError && a.texts[0] === b.texts[0] && /<html|<!doctype/i.test(a.texts[0]);
@@ -643,7 +649,7 @@ await liveCheck(
     };
   },
 );
-await liveCheck("14", "Gated option", "output_format json → 422 invalid_parameter", async () => {
+await liveCheck("14", "Gated option", "output_format json is refused: by the input schema, or by the API with 422 invalid_parameter", async () => {
   const r = await call(S, "crawl_create", { ...base, output_format: "json" });
   if (!r.isError && r.data?.crawl_id) {
     ledger(r.data.crawl_id, "output_format json (accepted)");
@@ -653,9 +659,15 @@ await liveCheck("14", "Gated option", "output_format json → 422 invalid_parame
       actual: `accepted (${r.data.crawl_id}): the key is in a beta segment, not a bug; stopped it`,
     };
   }
+  // Refusing a gated value before it reaches the API is the behavior we want.
+  const text = r.texts.join(" ");
+  const bySchema = r.isError && /-32602|input validation/i.test(text);
+  const byApi = r.data?.code === "CRAWL_INVALID_REQUEST";
   return {
-    status: SKIP,
-    actual: `the client does not allow it: the input schema takes "html" only (${H.trim(r.texts.join(" "), 200)})`,
+    status: passIf(bySchema || byApi),
+    actual: bySchema
+      ? `refused before the API: the input schema takes "html" only (${H.trim(text, 200)})`
+      : H.trim(show(r), 300),
   };
 });
 await check("15", "Bad key", "AUTH_INVALID", async () => {
