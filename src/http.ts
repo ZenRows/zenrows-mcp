@@ -64,15 +64,30 @@ app.get("/mcp/.well-known/oauth-authorization-server", (c) =>
 
 // RFC 9728 — OAuth Protected Resource Metadata
 // MCP clients fetch this first to discover the authorization server(s) for this resource.
-app.get("/.well-known/oauth-protected-resource", (c) =>
-  c.json({
-    resource: MCP_SERVER,
+//
+// `resource` must equal the identifier the well-known path was built from (RFC 9728
+// §3.3), so each URL names its own: the origin at the root, and the endpoint MCP
+// clients actually call, /mcp, at the path-suffixed URL (§3.1). Clients try the
+// suffixed one first and fall back to the root on a 404.
+//
+// `bearer_methods_supported` lists RFC 6750 methods only. The key is read from
+// `Authorization: Bearer` (6750 §2.1, "header"). The `?apikey=` query parameter is
+// not 6750's `access_token` (§2.3, "query"), and `access_token` is not read.
+const MCP_ENDPOINT = `${MCP_SERVER}/mcp`;
+const PROTECTED_RESOURCE_PATH = "/.well-known/oauth-protected-resource";
+
+function protectedResourceMetadata(resource: string) {
+  return {
+    resource,
     authorization_servers: [MCP_SERVER],
-    bearer_methods_supported: ["header", "query"],
+    bearer_methods_supported: ["header"],
     scopes_supported: SCOPES_SUPPORTED,
-    resource_documentation: "https://docs.zenrows.com",
-  })
-);
+    resource_documentation: "https://docs.zenrows.com/mcp/overview",
+  };
+}
+
+app.get(PROTECTED_RESOURCE_PATH, (c) => c.json(protectedResourceMetadata(MCP_SERVER)));
+app.get(`${PROTECTED_RESOURCE_PATH}/mcp`, (c) => c.json(protectedResourceMetadata(MCP_ENDPOINT)));
 
 // RFC 8414 — OAuth Authorization Server Metadata
 // Issuer must match the URL of the server serving this document (MCP_SERVER, not AUTH_SERVER),
@@ -195,10 +210,15 @@ app.all("/mcp", async (c) => {
       {
         // RFC 6750: name the scope in the challenge too, so a client learns what it is
         // being asked for without a second fetch of the metadata document.
-        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(" ")}", resource_metadata="${MCP_SERVER}/.well-known/oauth-protected-resource"`,
-        // CloudFront strips WWW-Authenticate — add Link header as RFC 8615 fallback
-        // so MCP clients can still discover the OAuth server
-        Link: `<${MCP_SERVER}/.well-known/oauth-protected-resource>; rel="oauth-protected-resource"`,
+        // resource_metadata is the /mcp document: RFC 9728 §3.3 wants its `resource`
+        // to equal the URL the client just called.
+        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(" ")}", resource_metadata="${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp"`,
+        // In production the Lambda Function URL renames this header to
+        // x-amzn-remapped-www-authenticate. CloudFront's response headers policy
+        // (iac-core-platform, 851-cloudfront-mcp.tf) drops that copy and sends a
+        // fixed WWW-Authenticate, so keep its value in step with this one.
+        // The Link header is a fallback for clients that ignore the challenge.
+        Link: `<${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp>; rel="oauth-protected-resource"`,
       }
     );
   }
