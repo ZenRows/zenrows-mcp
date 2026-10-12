@@ -213,10 +213,11 @@ app.all("/mcp", async (c) => {
         // resource_metadata is the /mcp document: RFC 9728 §3.3 wants its `resource`
         // to equal the URL the client just called.
         "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(" ")}", resource_metadata="${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp"`,
-        // In production this header reaches clients renamed to
-        // x-amzn-remapped-www-authenticate by the AWS layer in front of the Lambda
-        // (Function URL behind CloudFront), so clients find the metadata from this
-        // Link header or from well-known discovery instead.
+        // In production the Lambda Function URL renames this header to
+        // x-amzn-remapped-www-authenticate. CloudFront's response headers policy
+        // (iac-core-platform, 851-cloudfront-mcp.tf) drops that copy and sends a
+        // fixed WWW-Authenticate, so keep its value in step with this one.
+        // The Link header is a fallback for clients that ignore the challenge.
         Link: `<${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp>; rel="oauth-protected-resource"`,
       }
     );
