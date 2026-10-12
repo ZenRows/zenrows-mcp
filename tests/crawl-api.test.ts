@@ -389,12 +389,71 @@ test("a create is never retried on 429, even with an idempotency key", async () 
   assert.equal(calls.length, 1);
 });
 
-test("stop is not retried", async () => {
+test("stop is not retried on a plain 503", async () => {
   const { calls, fetchImpl } = sequence([503]);
   await assert.rejects(stopCrawl("c_1", { apiKey: "k", fetchImpl }), (e: unknown) => {
-    return e instanceof CrawlError && e.status === 503;
+    return e instanceof CrawlError && e.status === 503 && e.code === "CRAWL_FAILED";
   });
   assert.equal(calls.length, 1);
+});
+
+/** Stop answers 503 crawl_busy `busy` times, then stops the crawl. */
+function busyStop(busy: number, retryAfter = "1") {
+  const calls: string[] = [];
+  const fetchImpl = (async (_i: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(String(init?.method));
+    return calls.length <= busy
+      ? jsonResponse({ code: "crawl_busy", title: "Crawl busy", status: 503 }, 503, { "retry-after": retryAfter })
+      : jsonResponse({ crawl_id: "c_1", status: "stopped", stop_reason: "user" });
+  }) as typeof fetch;
+  return { calls, fetchImpl };
+}
+
+test("stop retries a 503 crawl_busy after Retry-After and returns the stopped crawl", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = busyStop(1);
+  const done = stopCrawl("c_1", { apiKey: "k", fetchImpl });
+  await flush();
+  t.mock.timers.tick(999);
+  await flush();
+  assert.equal(calls.length, 1, "no retry before Retry-After");
+  t.mock.timers.tick(1);
+  await flush();
+  assert.equal((await done).status, "stopped");
+  assert.equal(calls.length, 2);
+});
+
+test("stop gives up on crawl_busy after 3 retries with CRAWL_BUSY and retry_after", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = busyStop(10);
+  await assert.rejects(settle(t, stopCrawl("c_1", { apiKey: "k", fetchImpl })), (e: unknown) => {
+    return e instanceof CrawlError && e.code === "CRAWL_BUSY" && e.status === 503 && e.retryAfter === 1;
+  });
+  assert.equal(calls.length, 4);
+});
+
+test("a Retry-After above 30 seconds waits 30 seconds", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const call of [
+    () => {
+      const { calls, fetchImpl } = sequence([429], { "retry-after": "3600" });
+      return { calls, done: getCrawl("c_1", { apiKey: "k", fetchImpl }) };
+    },
+    () => {
+      const { calls, fetchImpl } = busyStop(1, "3600");
+      return { calls, done: stopCrawl("c_1", { apiKey: "k", fetchImpl }) };
+    },
+  ]) {
+    const { calls, done } = call();
+    await flush();
+    t.mock.timers.tick(29_999);
+    await flush();
+    assert.equal(calls.length, 1, "no retry before 30 s");
+    t.mock.timers.tick(1);
+    await flush();
+    assert.equal(calls.length, 2, "the retry comes at 30 s, not after an hour");
+    await done;
+  }
 });
 
 test("a retry waits the Retry-After seconds", async (t) => {

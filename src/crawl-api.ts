@@ -144,9 +144,13 @@ interface RequestOpts {
   timeoutMs?: number;
   userAgent?: string;
   fetchImpl?: typeof fetch;
+  /** Retry a 503 crawl_busy (stop only): the stop was not saved and the crawl still runs. */
+  retryBusy?: boolean;
 }
 
 const RETRIES = 3;
+/** The longest a Retry-After may make one retry wait, so a large server value cannot hang a call. */
+export const MAX_RETRY_AFTER_SECONDS = 30;
 const GET_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 // 429 too_many_crawls is a capacity limit: a retry only waits for a slot the caller may never get.
 const CREATE_RETRY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
@@ -163,9 +167,22 @@ function retryAfterSeconds(header: string | null | undefined): number | undefine
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+function retryAfterMs(retryAfter: number | undefined, fallbackMs: number): number {
+  return retryAfter !== undefined ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1000 : fallbackMs;
+}
+
+function problemCode(body: string): string | undefined {
+  try {
+    return (JSON.parse(body) as ProblemJson).code;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * GETs retry; a POST retries only with an idempotency key (create), so stop never does.
- * Network errors, the request timeout included, retry under the same rule.
+ * GETs retry; a POST retries only with an idempotency key (create). Stop retries only a 503
+ * crawl_busy, which means nothing was saved. Network errors, the request timeout included,
+ * retry under the GET and create rule.
  */
 async function crawlFetch(method: string, path: string, opts: RequestOpts, accept: string): Promise<Response> {
   const url = new URL(crawlBase() + path);
@@ -210,10 +227,15 @@ async function crawlFetch(method: string, path: string, opts: RequestOpts, accep
     const retryAfter = retryAfterSeconds(res.headers.get("retry-after"));
     if (canRetry && retryStatuses.has(res.status)) {
       await res.body?.cancel();
-      await sleep(retryAfter !== undefined ? retryAfter * 1000 : backoffMs(attempt));
+      await sleep(retryAfterMs(retryAfter, backoffMs(attempt)));
       continue;
     }
-    throw problemToError(res.status, await res.text(), method, path, retryAfter);
+    const body = await res.text();
+    if (opts.retryBusy && attempt < RETRIES && res.status === 503 && problemCode(body) === "crawl_busy") {
+      await sleep(retryAfterMs(retryAfter, 1000));
+      continue;
+    }
+    throw problemToError(res.status, body, method, path, retryAfter);
   }
 }
 
@@ -293,6 +315,13 @@ export function problemToError(
       "A request with the same idempotency key is still in progress. Retry after the first request finishes."
     );
   }
+  if (status === 503 && serverCode === "crawl_busy") {
+    return error(
+      "CRAWL_BUSY",
+      "The stop was not saved yet and the crawl is still running. Call crawl_stop again after retry_after seconds; repeating a stop is safe.",
+      retryAfter
+    );
+  }
   if (status === 400 || status === 422) {
     const advice = serverCode === "idempotency_key_reused" ? " Send a new idempotency_key, or none." : "";
     return error(
@@ -331,7 +360,7 @@ export function listCrawls(opts: CallOpts & { cursor?: string; limit?: number })
 }
 
 export function stopCrawl(id: string, opts: CallOpts): Promise<CrawlStop> {
-  return crawlRequest<CrawlStop>("POST", `${crawlPath(id)}/stop`, opts);
+  return crawlRequest<CrawlStop>("POST", `${crawlPath(id)}/stop`, { ...opts, retryBusy: true });
 }
 
 /** One kept URL's page, as the crawl stored it (HTML text for output_format html). */
