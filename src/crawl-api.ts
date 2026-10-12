@@ -2,8 +2,8 @@
  * Client for the Zenrows Crawl API (https://api.zenrows.com/v1/crawls).
  * Auth via X-API-Key header. Errors are application/problem+json (RFC 9457).
  *
- * A crawl follows the links on each page up to `depth` and stays on the start URL's
- * registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
+ * A crawl follows the links on each page up to `depth` hops, or with no depth limit when the
+ * create leaves `depth` out, and stays on the start URL's registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
  * is stored) or absent (URLs only).
  */
 
@@ -27,7 +27,8 @@ export interface Crawl {
   crawl_id: string;
   status: string;
   url: string;
-  depth: number;
+  /** Absent when the create left depth out: the crawl has no depth limit. */
+  depth?: number;
   max_items: number;
   max_pages: number;
   coverage: CrawlCoverage;
@@ -70,7 +71,8 @@ export interface CrawlStop {
 /** Create body. Unset fields are not sent. */
 export interface CreateCrawlBody {
   url: string;
-  depth: number;
+  /** Left out: no depth limit; max_pages or max_items ends the crawl. */
+  depth?: number;
   max_items?: number;
   max_pages?: number;
   include_patterns?: string[];

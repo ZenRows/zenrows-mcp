@@ -113,7 +113,12 @@ test("404 crawl_not_found and content_not_found map to their own codes", async (
 test("422 passes Crawl's detail through in the message", async () => {
   const fetchImpl = (async () =>
     jsonResponse(
-      { code: "invalid_parameter", title: "Invalid parameter", detail: "'depth' is above 100000.", status: 422 },
+      {
+        code: "invalid_parameter",
+        title: "Invalid parameter",
+        detail: "'depth' is between 1 and 100000. Leave it out for no depth limit.",
+        status: 422,
+      },
       422
     )) as typeof fetch;
   await assert.rejects(
@@ -122,7 +127,7 @@ test("422 passes Crawl's detail through in the message", async () => {
       assert.ok(e instanceof CrawlError);
       assert.equal(e.code, "CRAWL_INVALID_REQUEST");
       assert.match(e.message, /invalid_parameter/);
-      assert.match(e.message, /'depth' is above 100000/);
+      assert.match(e.message, /'depth' is between 1 and 100000\. Leave it out for no depth limit\./);
       return true;
     }
   );

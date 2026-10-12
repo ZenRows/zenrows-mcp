@@ -13,7 +13,7 @@ export const API_BASE = process.env.CRAWL_API_BASE || "https://api.zenrows.com/v
 /** An include pattern no URL contains: the crawl keeps nothing and ends failed (check 19). */
 export const NO_MATCH = "/crawl-acceptance-matches-nothing/";
 /** The default every client documents for max_pages and max_items (check 21). */
-export const DOCUMENTED_DEFAULT = 10;
+export const DOCUMENTED_DEFAULT = 100;
 export const PASS = "PASS";
 export const FAIL = "FAIL";
 export const SKIP = "SKIP";
