@@ -559,9 +559,9 @@ await liveCheck(
         : { status: FAIL, actual: "no result with content_url" };
     const a = await call(S, "crawl_content", {
       crawl_id: B.crawl_id,
-      content: row.content_url.split("/").pop(),
+      content_id: row.content_url.split("/").pop(),
     });
-    const b = await call(S, "crawl_content", { crawl_id: B.crawl_id, content: row.content_url });
+    const b = await call(S, "crawl_content", { crawl_id: B.crawl_id, content_id: row.content_url });
     content = a;
     const ok =
       !a.isError && !b.isError && a.texts[0] === b.texts[0] && /<html|<!doctype/i.test(a.texts[0]);
@@ -749,6 +749,7 @@ H.naming({
       "cursor",
       "limit",
       "timeout",
+      "content_id",
     ].map((k) => [k, k]),
   ),
 });
