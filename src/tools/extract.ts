@@ -262,8 +262,7 @@ export function registerExtractTool(server: McpServer, apiKey: string, getClient
       },
       description: `Extract structured data from a webpage via Zenrows.
 
-Prefer this over scrape when you need JSON fields (products, articles, listings)
-rather than a full page body.
+Returns JSON fields (products, articles, listings) rather than a full page body.
 Modes:
 - auto (default): extract=auto — site-tailored Extract (open beta; currently free,
   billing may apply later; falls back to autoparse when the domain isn't enabled
@@ -278,7 +277,7 @@ Set js_render or premium_proxy only to force a fixed configuration; that turns
 Adaptive Stealth Mode off and bills every request at that configuration's cost.
 
 Check "empty" in the result: true means no field came back with a value.
-For full-page markdown/HTML/screenshots, use scrape instead.`,
+Full-page markdown, HTML and screenshots come from scrape.`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to extract from"),
         mode: z
