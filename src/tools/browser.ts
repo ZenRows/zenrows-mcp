@@ -47,8 +47,8 @@ export function registerBrowserTools(
 This is the entry point for all browser automation. It creates a new session backed by
 Zenrows' anti-bot infrastructure and navigates to the given URL in one step.
 
-Returns a session_id that must be passed to every subsequent browser_* tool call.
-Always call browser_close when done to close the session and free resources.
+Returns a session_id that every other browser_* tool takes. The session holds one
+concurrency slot until browser_close closes it.
 
 When to use options:
 - proxy_country: geo-restricted content (ISO 3166-1 alpha-2, e.g. "US", "DE")
@@ -111,7 +111,7 @@ When to use options:
     {
       annotations: { title: "Close Browser Session", readOnlyHint: false, destructiveHint: false },
       description:
-        "Close a browser session and free all associated resources. Always call this when done to release the browser slot.",
+        "Close a browser session and free all associated resources, including the concurrency slot it holds.",
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
@@ -191,8 +191,7 @@ When to use options:
     "browser_click",
     {
       annotations: { title: "Click Element", readOnlyHint: false, destructiveHint: false },
-      description:
-        "Click an element on the page using a CSS selector. Use browser_get_accessibility_tree first to find the right selector.",
+      description: "Click an element on the page using a CSS selector.",
       inputSchema: {
         session_id: sessionId,
         selector: z.string().describe("CSS selector of the element to click"),
@@ -264,7 +263,7 @@ When to use options:
     "browser_fill",
     {
       annotations: { title: "Fill Input", readOnlyHint: false, destructiveHint: false },
-      description: "Clear an input field and set its value. Preferred over browser_type when replacing the full value.",
+      description: "Clear an input field and set its value, replacing what was there (browser_type appends instead).",
       inputSchema: {
         session_id: sessionId,
         selector: z.string().describe("CSS selector of the input element"),
@@ -460,9 +459,8 @@ When to use options:
       annotations: { title: "Get Accessibility Tree", readOnlyHint: true, destructiveHint: false },
       description: `Get the ARIA accessibility tree of the current page as readable text.
 
-Call this first after browser_navigate to understand the page structure before
-interacting with elements. More token-efficient than a screenshot for finding
-selectors and understanding layout.
+Shows the page structure and the selectors needed to interact with elements, in
+fewer tokens than a screenshot.
 
 The tree shows all interactive elements (buttons, inputs, links) with their roles,
 labels, and states — everything needed to drive browser interactions.`,
@@ -744,7 +742,7 @@ labels, and states — everything needed to drive browser interactions.`,
     {
       annotations: { title: "Wait for Navigation", readOnlyHint: true, destructiveHint: false },
       description:
-        "Wait for the page to navigate to a new URL. IMPORTANT: call this BEFORE the action that triggers navigation (e.g. before browser_click on a submit button), not after — the navigation event may already have fired and this will hang until timeout. If the page stays on the same URL (AJAX/SPA), skip this tool entirely. Optional timeout_ms (default 30000ms).",
+        "Wait for the page to navigate to a new URL. It waits for the next navigation event, so a navigation that already finished is not seen and the call waits until timeout_ms. Pages that update without changing URL (AJAX/SPA) fire no navigation event. Optional timeout_ms (default 30000ms).",
       inputSchema: {
         session_id: sessionId,
         timeout_ms: z
@@ -776,7 +774,7 @@ labels, and states — everything needed to drive browser interactions.`,
     "browser_wait",
     {
       annotations: { title: "Wait", readOnlyHint: true, destructiveHint: false },
-      description: "Wait for a fixed duration. Use sparingly — prefer browser_wait_for_selector when possible.",
+      description: "Wait for a fixed duration. browser_wait_for_selector waits only until an element appears.",
       inputSchema: {
         session_id: sessionId,
         ms: z.number().int().min(0).max(30000).describe("Milliseconds to wait (max 30000)"),
@@ -1232,8 +1230,8 @@ is faster than calling each tool individually.
 Actions run sequentially and stop at the first failure unless stop_on_error is false.
 Each step result is returned in the results array at the same index.
 
-Note: screenshots in batch results are returned as base64 strings inside the JSON.
-For proper image rendering, use browser_screenshot directly.`,
+Note: screenshots in batch results are returned as base64 strings inside the JSON;
+browser_screenshot returns them as images.`,
       inputSchema: {
         session_id: sessionId,
         actions: z
