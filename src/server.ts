@@ -96,14 +96,14 @@ export function createServer(apiKey: string, clientName?: string): McpServer {
       },
       description: `Scrape any webpage and return its content using Zenrows (Fetch).
 
-Use for full-page content (markdown/HTML/PDF/screenshot). For structured JSON
-fields (products, articles, listings), prefer the extract tool when it fits —
-it returns parsed fields instead of a full page body.
+Returns full-page content (markdown/HTML/PDF/screenshot). For structured JSON
+fields (products, articles, listings), the extract tool returns parsed fields
+instead of a full page body.
 
 By default the request uses Adaptive Stealth Mode: Zenrows picks JS rendering
 and premium proxies per page, escalates only when the site blocks, and charges
 only for the configuration that succeeds. Pass just the URL for protected,
-dynamic, or blocked pages; do not turn on js_render or premium_proxy to get past
+dynamic, or blocked pages; js_render and premium_proxy are not needed to get past
 a block.
 
 Set js_render or premium_proxy only to force a fixed configuration. Doing so
