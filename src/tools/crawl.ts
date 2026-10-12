@@ -1,6 +1,6 @@
 import { createRequire } from "module";
-import { mkdir, open, rename, rm, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { link, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
@@ -363,7 +363,7 @@ markdown version of a page, use scrape on its URL instead.`,
       },
       description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
-Idempotent: a crawl that already ended answers with its final status. A 503 crawl_busy (the stop was not saved yet) is retried up to 3 times; if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
+Idempotent: a crawl that already ended answers with its final status. A 503 crawl_busy (the stop was not saved yet) is retried up to 3 times, waiting at most 50 seconds in all; if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
       inputSchema: { crawl_id: crawlIdSchema },
     },
     async ({ crawl_id }) => {
@@ -415,12 +415,16 @@ Idempotent: a crawl that already ended answers with its final status. A 503 craw
       annotations: { title: "Download Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: `Save every result of a crawl to one local file, as JSON lines: url, content_status and, once fetched, content (the page). Returns the file's path and line count, not the results, so a crawl of any size costs one small reply. Read the file with your own tools.
 
-The file goes to path when given (a relative path resolves against ~/.zenrows/crawls), else ~/.zenrows/crawls/<crawl_id>.jsonl. An existing file is kept and the call fails with FILE_EXISTS unless overwrite is true.
+The file goes to path when given (a relative path inside ~/.zenrows/crawls; an absolute path or one that leaves that folder fails with INVALID_PATH), else ~/.zenrows/crawls/<crawl_id>.jsonl. An existing file is kept and the call fails with FILE_EXISTS unless overwrite is true.
 
 On a running crawl the file holds only what was kept so far: download again once crawl_wait says it ended. On the hosted server no file is written: the reply gives the download URL and a command to run where your API key is set.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
-        path: z.string().min(1).nullish().describe("File to write (default ~/.zenrows/crawls/<crawl_id>.jsonl)"),
+        path: z
+          .string()
+          .min(1)
+          .nullish()
+          .describe("File to write, relative to ~/.zenrows/crawls (default <crawl_id>.jsonl)"),
         overwrite: z.boolean().nullish().describe("Replace the file if it exists (default false)"),
       },
     },
@@ -429,8 +433,8 @@ On a running crawl the file holds only what was kept so far: download again once
         if (options.hosted) return json(await hostedDownload(crawl_id));
         return json(await saveDownload(crawl_id, path ?? undefined, overwrite ?? false));
       } catch (e) {
-        if (e instanceof FileExists) {
-          return err({ code: "FILE_EXISTS", message: e.message, crawl_id, path: e.path });
+        if (e instanceof PathRefused) {
+          return err({ code: e.code, message: e.message, crawl_id, path: e.path });
         }
         return crawlErr(e, crawl_id);
       }
@@ -455,12 +459,21 @@ On a running crawl the file holds only what was kept so far: download again once
   }
 
   async function saveDownload(crawlId: string, path: string | undefined, overwrite: boolean) {
-    const target = resolve(downloadDir, path ?? fileNameFor(crawlId));
-    if (!overwrite && (await exists(target))) throw new FileExists(target);
+    const base = resolve(downloadDir);
+    const target = resolve(base, path ?? fileNameFor(crawlId));
+    const rel = relative(base, target);
+    if (path !== undefined && (isAbsolute(path) || !rel || rel === ".." || rel.startsWith(`..${sep}`))) {
+      throw new PathRefused(
+        "INVALID_PATH",
+        path,
+        `${path} is not a file inside ${base}. Pass a path relative to it that stays inside it.`
+      );
+    }
+    if (!overwrite && (await exists(target))) throw fileExists(target);
     await mkdir(dirname(target), { recursive: true });
     const res = await downloadCrawl(crawlId, call);
     const status = res.headers.get("x-crawl-status") ?? undefined;
-    // Write beside the target, then rename: a cut-off download never leaves a short file
+    // Write beside the target, then move it into place: a cut-off download never leaves a short file
     // where a complete one is expected.
     const part = `${target}.part`;
     const counts: Record<string, number> = {};
@@ -492,7 +505,15 @@ On a running crawl the file holds only what was kept so far: download again once
       }
       tally(rest + decoder.decode());
       await file.close();
-      await rename(part, target);
+      if (overwrite) {
+        await rename(part, target);
+      } else {
+        // link fails on an existing target, so a file made since the check above is never replaced.
+        await link(part, target).catch((e: NodeJS.ErrnoException) => {
+          throw e.code === "EEXIST" ? fileExists(target) : e;
+        });
+        await rm(part);
+      }
     } catch (e) {
       await file.close().catch(() => undefined);
       await rm(part, { force: true });
@@ -519,11 +540,18 @@ On a running crawl the file holds only what was kept so far: download again once
   }
 }
 
-class FileExists extends Error {
-  constructor(readonly path: string) {
-    super(`${path} already exists. Pass overwrite: true to replace it, or another path.`);
+class PathRefused extends Error {
+  constructor(
+    readonly code: "FILE_EXISTS" | "INVALID_PATH",
+    readonly path: string,
+    message: string
+  ) {
+    super(message);
   }
 }
+
+const fileExists = (path: string) =>
+  new PathRefused("FILE_EXISTS", path, `${path} already exists. Pass overwrite: true to replace it, or another path.`);
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(

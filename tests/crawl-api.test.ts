@@ -483,3 +483,46 @@ test("a GET is retried after a network error", async (t) => {
   await settle(t, listCrawls({ apiKey: "k", fetchImpl }));
   assert.equal(calls, 2);
 });
+
+test("stop waits on crawl_busy 50 seconds at most in all", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { calls, fetchImpl } = busyStop(10, "30");
+  await assert.rejects(settle(t, stopCrawl("c_1", { apiKey: "k", fetchImpl })), (e: unknown) => {
+    return e instanceof CrawlError && e.code === "CRAWL_BUSY" && e.retryAfter === 30;
+  });
+  assert.equal(calls.length, 2, "a second 30 s wait would pass 50 s");
+});
+
+test("a Retry-After HTTP-date gives the seconds until that date", async () => {
+  for (const [header, expected] of [
+    [new Date(Date.now() + 10_000).toUTCString(), [9, 10]],
+    ["Wed, 21 Oct 2015 07:28:00 GMT", [0, 0]],
+  ] as const) {
+    const { fetchImpl } = sequence([429], { "retry-after": header });
+    await assert.rejects(createCrawl(createBody, { apiKey: "k", fetchImpl }), (e: unknown) => {
+      return (
+        e instanceof CrawlError &&
+        e.retryAfter !== undefined &&
+        e.retryAfter >= expected[0] &&
+        e.retryAfter <= expected[1]
+      );
+    });
+  }
+});
+
+test("the request timeout covers a body that stalls after the headers", async () => {
+  const fetchImpl = (async (_i: RequestInfo | URL, init?: RequestInit) =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode('{"crawl_id":'));
+          init?.signal?.addEventListener("abort", () => c.error(init.signal?.reason));
+        },
+      }),
+      { status: 200 }
+    )) as typeof fetch;
+  await assert.rejects(
+    () => stopCrawl("c_1", { apiKey: "k", fetchImpl, timeoutMs: 20 }),
+    (e: unknown) => e instanceof CrawlError && e.code === "BACKEND_UNAVAILABLE"
+  );
+});

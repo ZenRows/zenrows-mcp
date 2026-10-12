@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
+import { writeFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -604,6 +605,41 @@ test("crawl_download keeps an existing file unless overwrite is true", async () 
   assert.equal(body.lines, 1);
   assert.equal("note" in body, false);
   assert.equal(JSON.parse(await readFile(join(dir, "mine.jsonl"), "utf8")).url, "https://example.com/a");
+});
+
+test("crawl_download keeps a file made while it downloaded", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    () => {
+      writeFileSync(join(dir, "mine.jsonl"), "keep me\n");
+      return ndjson(lines);
+    },
+    () => handlers.crawl_download({ crawl_id: "c_1", path: "mine.jsonl" })
+  );
+  assert.equal(out.isError, true);
+  assert.equal(JSON.parse(out.content[0].text).code, "FILE_EXISTS");
+  assert.equal(await readFile(join(dir, "mine.jsonl"), "utf8"), "keep me\n");
+  assert.deepEqual(await readdir(dir), ["mine.jsonl"]);
+});
+
+test("crawl_download refuses a path outside its directory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: join(dir, "crawls") });
+  let fetched = 0;
+  for (const path of [join(dir, "crawls", "abs.jsonl"), "../out.jsonl", "a/../../out.jsonl", "."]) {
+    const out = await withFetch(
+      () => {
+        fetched++;
+        return ndjson(lines);
+      },
+      () => handlers.crawl_download({ crawl_id: "c_1", path })
+    );
+    assert.equal(out.isError, true, path);
+    assert.equal(JSON.parse(out.content[0].text).code, "INVALID_PATH", path);
+  }
+  assert.equal(fetched, 0);
+  assert.deepEqual(await readdir(dir), []);
 });
 
 test("crawl_download on a running crawl says the file is partial", async () => {

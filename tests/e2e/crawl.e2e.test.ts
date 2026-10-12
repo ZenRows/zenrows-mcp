@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import { after, before, test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -117,11 +115,11 @@ test("crawl tools end to end", { skip, timeout: 15 * 60_000 }, async () => {
   console.log(`crawl_content: ${html.length} chars of HTML`);
   assert.match(html, /<html|<!doctype html/i);
 
-  const path = join(await mkdtemp(join(tmpdir(), "crawl-e2e-")), "crawl.jsonl");
-  const download = await call("crawl_download", { crawl_id: crawlId, path });
+  const download = await call("crawl_download", { crawl_id: crawlId, path: `e2e-${crawlId}.jsonl` });
   assert.ok(!download.isError, download.content[0].text);
   const d = body(download) as { status: string; lines: number; path: string };
   const saved = (await readFile(d.path, "utf8")).trim().split("\n");
+  await rm(d.path);
   console.log(`crawl_download: ${d.lines} lines, status ${d.status}`);
   assert.equal(d.status, "completed");
   assert.equal(d.lines, r.count, "one line per result");

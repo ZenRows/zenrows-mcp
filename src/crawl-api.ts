@@ -160,9 +160,13 @@ function backoffMs(attempt: number): number {
   return Math.min(250 * 2 ** attempt, 10_000) * (0.8 + Math.random() * 0.4);
 }
 
+/** Retry-After as delay-seconds or as an HTTP-date. */
 function retryAfterSeconds(header: string | null | undefined): number | undefined {
+  if (!header) return undefined;
   const seconds = Number(header);
-  return header && Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds : undefined;
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, Math.ceil((date - Date.now()) / 1000));
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -181,10 +185,17 @@ function problemCode(body: string): string | undefined {
 
 /**
  * GETs retry; a POST retries only with an idempotency key (create). Stop retries only a 503
- * crawl_busy, which means nothing was saved. Network errors, the request timeout included,
- * retry under the GET and create rule.
+ * crawl_busy, which means nothing was saved, and waits on it DEFAULT_WAIT_SECONDS at most in
+ * all. Network errors, the request timeout included, retry under the GET and create rule.
+ * The timeout covers reading the body; `raw` leaves a success body unread for the caller to stream.
  */
-async function crawlFetch(method: string, path: string, opts: RequestOpts, accept: string): Promise<Response> {
+async function crawlFetch(
+  method: string,
+  path: string,
+  opts: RequestOpts,
+  accept: string,
+  raw = false
+): Promise<{ res: Response; body: string }> {
   const url = new URL(crawlBase() + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v !== undefined && v !== null) url.searchParams.set(k, v);
@@ -198,12 +209,14 @@ async function crawlFetch(method: string, path: string, opts: RequestOpts, accep
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
   const retryStatuses = method === "GET" ? GET_RETRY_STATUSES : opts.idempotencyKey ? CREATE_RETRY_STATUSES : undefined;
   const doFetch = opts.fetchImpl ?? fetch;
+  let busyWaitMs = 0;
 
   for (let attempt = 0; ; attempt++) {
     const canRetry = retryStatuses !== undefined && attempt < RETRIES;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 60_000);
     let res: Response;
+    let body = "";
     try {
       res = await doFetch(url.toString(), {
         method,
@@ -211,6 +224,7 @@ async function crawlFetch(method: string, path: string, opts: RequestOpts, accep
         body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
         signal: controller.signal,
       });
+      if (!(raw && res.ok)) body = await res.text();
     } catch (err) {
       clearTimeout(timeout);
       if (canRetry) {
@@ -223,25 +237,27 @@ async function crawlFetch(method: string, path: string, opts: RequestOpts, accep
       });
     }
     clearTimeout(timeout);
-    if (res.status >= 200 && res.status < 300) return res;
+    if (res.status >= 200 && res.status < 300) return { res, body };
     const retryAfter = retryAfterSeconds(res.headers.get("retry-after"));
     if (canRetry && retryStatuses.has(res.status)) {
-      await res.body?.cancel();
       await sleep(retryAfterMs(retryAfter, backoffMs(attempt)));
       continue;
     }
-    const body = await res.text();
     if (opts.retryBusy && attempt < RETRIES && res.status === 503 && problemCode(body) === "crawl_busy") {
-      await sleep(retryAfterMs(retryAfter, 1000));
-      continue;
+      const wait = retryAfterMs(retryAfter, 1000);
+      // Many MCP clients cancel a tool call after 60 s.
+      if (busyWaitMs + wait <= DEFAULT_WAIT_SECONDS * 1000) {
+        busyWaitMs += wait;
+        await sleep(wait);
+        continue;
+      }
     }
     throw problemToError(res.status, body, method, path, retryAfter);
   }
 }
 
 export async function crawlRequest<T>(method: string, path: string, opts: RequestOpts): Promise<T> {
-  const res = await crawlFetch(method, path, opts, "application/json");
-  const text = await res.text();
+  const { body: text } = await crawlFetch(method, path, opts, "application/json");
   if (!text) return null as T;
   try {
     return JSON.parse(text) as T;
@@ -372,8 +388,13 @@ export async function getCrawlContent(
   contentId: string,
   opts: CallOpts
 ): Promise<{ contentType: string; body: string }> {
-  const res = await crawlFetch("GET", `${crawlPath(id)}/contents/${encodeURIComponent(contentId)}`, opts, "*/*");
-  return { contentType: res.headers.get("content-type") ?? "", body: await res.text() };
+  const { res, body } = await crawlFetch(
+    "GET",
+    `${crawlPath(id)}/contents/${encodeURIComponent(contentId)}`,
+    opts,
+    "*/*"
+  );
+  return { contentType: res.headers.get("content-type") ?? "", body };
 }
 
 /** Where a crawl's download lives: every result as NDJSON, one line per kept URL. */
@@ -385,8 +406,8 @@ export function crawlDownloadUrl(id: string): string {
  * The crawl's download, unread: one JSON line per kept URL (`url`, `content_status`, and
  * `content` once fetched). The X-Crawl-Status header carries the crawl's status when it was read.
  */
-export function downloadCrawl(id: string, opts: CallOpts): Promise<Response> {
-  return crawlFetch("GET", `${crawlPath(id)}/download`, opts, "*/*");
+export async function downloadCrawl(id: string, opts: CallOpts): Promise<Response> {
+  return (await crawlFetch("GET", `${crawlPath(id)}/download`, opts, "*/*", true)).res;
 }
 
 /** A content id as given, or the last path segment of a result's content_url. */

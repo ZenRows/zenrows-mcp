@@ -596,7 +596,7 @@ await liveCheck(
   "crawl_download saves one line per result (url, content_status, content once fetched), keeps an existing file",
   async () => {
     if (!B) return { status: SKIP, actual: "no html crawl" };
-    const path = `/tmp/crawl-acceptance/${B.crawl_id}.jsonl`;
+    const path = `crawl-acceptance/${B.crawl_id}.jsonl`;
     const r = await call(S, "crawl_download", { crawl_id: B.crawl_id, path });
     if (r.isError || !r.data?.path) return { status: FAIL, actual: r.texts.join(" ").slice(0, 300) };
     const lines = readFileSync(r.data.path, "utf8")
