@@ -17,15 +17,29 @@ KEY = os.environ["ZENROWS_API_KEY"]
 
 
 def call(method, path):
+    """Returns (status, body, headers). Network errors and timeouts raise OSError."""
     req = urllib.request.Request(BASE + path, method=method, headers={"X-API-Key": KEY})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
-            return r.status, json.loads(r.read() or b"null")
+            return r.status, json.loads(r.read() or b"null"), r.headers
     except urllib.error.HTTPError as e:
         try:
-            return e.code, json.loads(e.read() or b"null")
+            return e.code, json.loads(e.read() or b"null"), e.headers
         except ValueError:
-            return e.code, None
+            return e.code, None, e.headers
+
+
+def stop(crawl_id):
+    """A 503 crawl_busy means the stop was not saved: wait its Retry-After and try again, 3 times at most."""
+    for attempt in range(4):
+        status, body, headers = call("POST", f"/crawls/{crawl_id}/stop")
+        if attempt == 3 or status != 503 or not body or body.get("code") != "crawl_busy":
+            return status
+        try:
+            wait = float(headers.get("Retry-After", 1))
+        except ValueError:
+            wait = 1
+        time.sleep(min(max(wait, 0), 30))
 
 
 crawls = {}
@@ -41,13 +55,17 @@ if os.path.exists(ledger):
 
 rows = []
 for crawl_id, entry in crawls.items():
-    status, body = call("GET", f"/crawls/{crawl_id}?limit=1")
     stopped = False
-    if status == 200 and body and body.get("status") == "running":
-        call("POST", f"/crawls/{crawl_id}/stop")
-        stopped = True
-        time.sleep(2)
-        status, body = call("GET", f"/crawls/{crawl_id}?limit=1")
+    try:
+        status, body, _ = call("GET", f"/crawls/{crawl_id}?limit=1")
+        if status == 200 and body and body.get("status") == "running":
+            stopped = 200 <= stop(crawl_id) < 300
+            time.sleep(2)
+            status, body, _ = call("GET", f"/crawls/{crawl_id}?limit=1")
+    except OSError as e:
+        rows.append({"crawl_id": crawl_id, **entry, "stopped_by_cleanup": stopped, "error": str(e)})
+        print(f"{crawl_id} not reached: {e}")
+        continue
     row = {"crawl_id": crawl_id, **entry, "stopped_by_cleanup": stopped, "http": status}
     if status == 200 and body:
         row.update(status=body.get("status"), stop_reason=body.get("stop_reason"),
@@ -57,7 +75,8 @@ for crawl_id, entry in crawls.items():
     print(f"{crawl_id} {row.get('status')} pages_fetched={row.get('pages_fetched')}"
           f"{' (stopped by clean-up)' if stopped else ''}")
 
-still = [r["crawl_id"] for r in rows if r.get("status") == "running"]
+# A crawl the API did not answer for may still run.
+still = [r["crawl_id"] for r in rows if r.get("status") == "running" or "error" in r]
 with open(os.path.join(OUT, "cleanup.json"), "w") as f:
     json.dump({"crawls": rows, "still_running": still,
                "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f, indent=2)

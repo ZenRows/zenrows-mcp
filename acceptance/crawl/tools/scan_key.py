@@ -4,9 +4,10 @@ import sys
 
 key = os.environ.get("ZENROWS_API_KEY", "").encode()
 hits = []
-for root, _, files in os.walk(sys.argv[1]):
-    if os.sep + "build" in root:
-        continue
+for root, dirs, files in os.walk(sys.argv[1]):
+    # Only out/build itself, where the builders write the source copy and the artifact.
+    if root == sys.argv[1] and "build" in dirs:
+        dirs.remove("build")
     for f in files:
         p = os.path.join(root, f)
         try:
