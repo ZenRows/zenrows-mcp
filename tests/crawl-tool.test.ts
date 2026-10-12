@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
-import { registerCrawlTools } from "../src/tools/crawl.ts";
+import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CrawlToolOptions, registerCrawlTools } from "../src/tools/crawl.ts";
 
 type Handler = (p: unknown) => Promise<{ content: { type: string; text: string }[]; isError?: boolean }>;
 type Config = {
@@ -10,7 +13,7 @@ type Config = {
   annotations: { destructiveHint: boolean; readOnlyHint: boolean; idempotentHint?: boolean };
 };
 
-function register() {
+function register(options?: CrawlToolOptions) {
   const handlers: Record<string, Handler> = {};
   const configs: Record<string, Config> = {};
   registerCrawlTools(
@@ -20,7 +23,8 @@ function register() {
         configs[name] = c;
       },
     } as never,
-    "k"
+    "k",
+    options
   );
   return { handlers, configs };
 }
@@ -49,11 +53,12 @@ const crawl = (status = "running") => ({
   created_at: "2026-10-08T00:00:00Z",
 });
 
-test("registers the seven crawl tools, with only crawl_stop destructive and idempotent", () => {
+test("registers the eight crawl tools, with only crawl_stop destructive and idempotent", () => {
   const { configs } = register();
   assert.deepEqual(Object.keys(configs).sort(), [
     "crawl_content",
     "crawl_create",
+    "crawl_download",
     "crawl_get",
     "crawl_list",
     "crawl_results",
@@ -62,7 +67,7 @@ test("registers the seven crawl tools, with only crawl_stop destructive and idem
   ]);
   for (const [name, c] of Object.entries(configs)) {
     assert.equal(c.annotations.destructiveHint, name === "crawl_stop", name);
-    assert.equal(c.annotations.readOnlyHint, !["crawl_create", "crawl_stop"].includes(name), name);
+    assert.equal(c.annotations.readOnlyHint, !["crawl_create", "crawl_stop", "crawl_download"].includes(name), name);
   }
   assert.equal(configs.crawl_stop.annotations.idempotentHint, true);
 });
@@ -74,7 +79,66 @@ test("crawl_create's output_format accepts only html", () => {
   assert.equal(schema.safeParse(base).success, true);
   assert.equal(schema.safeParse({ ...base, output_format: "json" }).success, false);
   assert.equal(schema.safeParse({ url: "https://example.com/" }).success, false, "depth is required");
-  assert.equal(schema.safeParse({ ...base, depth: 0 }).success, false);
+  // The API judges the lower bound: depth 0 reaches it and comes back as CRAWL_INVALID_REQUEST.
+  assert.equal(schema.safeParse({ ...base, depth: 0 }).success, true);
+  assert.equal(schema.safeParse({ ...base, depth: 1.5 }).success, false);
+  assert.equal(schema.safeParse({ ...base, depth: 100_001 }).success, false);
+});
+
+test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () =>
+      jsonResponse(
+        {
+          code: "invalid_parameter",
+          title: "Invalid parameter",
+          status: 422,
+          detail: "'depth' is required, and at least 1.",
+        },
+        422
+      ),
+    () => handlers.crawl_create({ url: "https://example.com/", depth: 0 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(out.isError, true);
+  assert.equal(body.code, "CRAWL_INVALID_REQUEST");
+  assert.equal(body.server_code, "invalid_parameter");
+});
+
+test("crawl_results on a stopped crawl ends at an empty page even while next_cursor stays set", async () => {
+  const { handlers } = register();
+  const rows = [{ url: "https://example.com/p/1", content_status: "pending" }];
+  let calls = 0;
+  const out = await withFetch(
+    () => {
+      calls++;
+      // Pages in flight after the stop: the API keeps a cursor but has no new rows.
+      return jsonResponse({ ...crawl("stopped"), results: calls === 1 ? rows : [], next_cursor: "still-set" });
+    },
+    () => handlers.crawl_results({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.count, 1);
+  assert.equal(body.partial, false);
+  assert.equal(body.next_cursor, null);
+  assert.equal("note" in body, false);
+});
+
+test("crawl_results on an ended crawl still says partial when the call filled its limit", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () =>
+      jsonResponse({
+        ...crawl("completed"),
+        results: [{ url: "https://example.com/p/1" }, { url: "https://example.com/p/2" }],
+        next_cursor: "more",
+      }),
+    () => handlers.crawl_results({ crawl_id: "c_1", limit: 2 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.partial, true);
+  assert.equal(body.next_cursor, "more");
 });
 
 test("crawl_create's schema takes only its own inputs and drops unknown ones", () => {
@@ -227,6 +291,35 @@ test("crawl_get carries crawl_id on an error", async () => {
   assert.equal(body.code, "CRAWL_NOT_FOUND");
   assert.equal(body.server_code, "crawl_not_found");
   assert.equal(body.crawl_id, "c_missing");
+});
+
+test("a crawl that ended failed comes back ok: false with its error, from crawl_wait and crawl_get", async () => {
+  const { handlers } = register();
+  const failed = { ...crawl("failed"), error: { code: "no_items_found", detail: "No link matched the URL patterns." } };
+  for (const call of [
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
+    () => handlers.crawl_get({ crawl_id: "c_1" }),
+  ]) {
+    const out = await withFetch(() => jsonResponse({ ...failed, results: [], next_cursor: null }), call);
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, false);
+    assert.equal(body.status, "failed");
+    assert.equal(body.crawl_id, "c_1");
+    assert.equal(body.error.code, "CRAWL_FAILED");
+    assert.equal(body.error.server_code, "no_items_found");
+    assert.match(body.error.message, /No link matched/);
+  }
+});
+
+test("a crawl that did not fail stays ok: true with no error", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ ...crawl("completed"), results: [], next_cursor: null }),
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.ok, true);
+  assert.equal("error" in body, false);
 });
 
 test("crawl_wait takes timeout in seconds and returns the running crawl when it runs out", async () => {
@@ -399,4 +492,203 @@ test("crawl_list passes cursor and limit and reports next_cursor null on the las
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.count, 1);
   assert.equal(body.next_cursor, null);
+});
+
+test("crawl_wait on an ended crawl returns its counts and the first 20 URLs, pointing at crawl_download", async () => {
+  const { handlers } = register();
+  const limits: (string | null)[] = [];
+  const many = { ...crawl("completed"), coverage: { pages_fetched: 30, pages_failed: 0, items_found: 30 } };
+  const out = await withFetch(
+    (u) => {
+      const limit = new URL(u).searchParams.get("limit");
+      limits.push(limit);
+      const n = Number(limit);
+      const results = Array.from({ length: n }, (_, i) => ({ url: `https://example.com/${i}` }));
+      return jsonResponse({ ...many, results, next_cursor: "x" });
+    },
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.deepEqual(limits, ["1", "20"]);
+  assert.equal(body.first_urls.length, 20);
+  assert.equal(body.first_urls[0], "https://example.com/0");
+  assert.equal("results" in body, false);
+  assert.match(body.note, /20 of 30 URLs.*crawl_download/);
+});
+
+test("crawl_wait still answers when reading the first URLs fails", async () => {
+  const { handlers } = register();
+  let calls = 0;
+  const out = await withFetch(
+    () =>
+      ++calls === 1 ? jsonResponse({ ...crawl("completed"), results: [], next_cursor: null }) : jsonResponse({}, 404),
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(out.isError, undefined);
+  assert.equal(body.status, "completed");
+  assert.equal("first_urls" in body, false);
+});
+
+const ndjson = (lines: unknown[], status = "completed", split = false) => {
+  const text = lines.map((l) => JSON.stringify(l)).join("\n") + "\n";
+  const bytes = new TextEncoder().encode(text);
+  // Split mid-line so the line count cannot rely on chunk boundaries.
+  const chunks = split ? [bytes.slice(0, 7), bytes.slice(7)] : [bytes];
+  const body = new ReadableStream({
+    start(c) {
+      for (const chunk of chunks) c.enqueue(chunk);
+      c.close();
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "application/x-ndjson", "x-crawl-status": status },
+  });
+};
+
+const lines = [
+  { url: "https://example.com/a", content_status: "fetched", content: "<html>a</html>" },
+  { url: "https://example.com/b", content_status: "fetched", content: "<html>b</html>" },
+  { url: "https://example.com/c", content_status: "pending" },
+];
+
+test("crawl_download saves every line to <dir>/<crawl_id>.jsonl and counts them", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const seen: string[] = [];
+  const out = await withFetch(
+    (u, init) => {
+      seen.push(`${init?.method} ${new URL(u).pathname} ${(init?.headers as Record<string, string>)["X-API-Key"]}`);
+      return ndjson(lines, "stopped", true);
+    },
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  assert.equal(out.isError, undefined, out.content[0].text);
+  const body = JSON.parse(out.content[0].text);
+  assert.deepEqual(seen, ["GET /v1/crawls/c_1/download k"]);
+  assert.equal(body.ok, true);
+  assert.equal(body.path, join(dir, "c_1.jsonl"));
+  assert.equal(body.status, "stopped");
+  assert.equal(body.lines, 3);
+  assert.deepEqual(body.content_status, { fetched: 2, pending: 1 });
+  assert.match(body.note, /1 line\(s\) are pending.*overwrite: true/);
+  const saved = (await readFile(body.path, "utf8"))
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  assert.deepEqual(saved, lines);
+  assert.deepEqual(await readdir(dir), ["c_1.jsonl"]);
+});
+
+test("crawl_download keeps an existing file unless overwrite is true", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  await writeFile(join(dir, "mine.jsonl"), "keep me\n");
+  const { handlers } = register({ downloadDir: dir });
+  let fetched = 0;
+  const impl = () => {
+    fetched++;
+    return ndjson(lines.slice(0, 1));
+  };
+  const kept = await withFetch(impl, () => handlers.crawl_download({ crawl_id: "c_1", path: "mine.jsonl" }));
+  assert.equal(kept.isError, true);
+  assert.equal(JSON.parse(kept.content[0].text).code, "FILE_EXISTS");
+  assert.equal(fetched, 0, "nothing is downloaded before the path is known to be free");
+  assert.equal(await readFile(join(dir, "mine.jsonl"), "utf8"), "keep me\n");
+
+  const replaced = await withFetch(impl, () =>
+    handlers.crawl_download({ crawl_id: "c_1", path: "mine.jsonl", overwrite: true })
+  );
+  const body = JSON.parse(replaced.content[0].text);
+  assert.equal(body.lines, 1);
+  assert.equal("note" in body, false);
+  assert.equal(JSON.parse(await readFile(join(dir, "mine.jsonl"), "utf8")).url, "https://example.com/a");
+});
+
+test("crawl_download on a running crawl says the file is partial", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    () => ndjson([{ url: "https://example.com/a" }], "running"),
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.status, "running");
+  assert.equal("content_status" in body, false, "a URLs-only crawl has no content_status to count");
+  assert.match(body.note, /still running.*Download again/);
+});
+
+test("crawl_download keeps the crawl id from naming a file outside the directory", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    () => ndjson(lines),
+    () => handlers.crawl_download({ crawl_id: "../../c_1" })
+  );
+  assert.equal(JSON.parse(out.content[0].text).path, join(dir, "______c_1.jsonl"));
+});
+
+test("a cut-off crawl_download leaves no file behind and reports the error", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    () =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"url":"https://example.com/a"}\n'));
+            c.error(new Error("connection reset"));
+          },
+        }),
+        { status: 200, headers: { "x-crawl-status": "completed" } }
+      ),
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  assert.equal(out.isError, true);
+  assert.match(out.content[0].text, /connection reset/);
+  assert.equal(JSON.parse(out.content[0].text).crawl_id, "c_1");
+  assert.deepEqual(await readdir(dir), []);
+});
+
+test("crawl_download maps a missing crawl to CRAWL_NOT_FOUND and writes nothing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    () =>
+      new Response(JSON.stringify({ status: 404, code: "crawl_not_found", detail: "no such crawl" }), {
+        status: 404,
+        headers: { "content-type": "application/problem+json" },
+      }),
+    () => handlers.crawl_download({ crawl_id: "c_missing" })
+  );
+  assert.equal(out.isError, true);
+  assert.equal(JSON.parse(out.content[0].text).code, "CRAWL_NOT_FOUND");
+  assert.deepEqual(await readdir(dir), []);
+});
+
+test("hosted crawl_download writes no file and gives a command that names the key, never holds it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ hosted: true, downloadDir: dir });
+  const out = await withFetch(
+    () => jsonResponse({ ...crawl("completed"), results: [], next_cursor: null }),
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.ok, true);
+  assert.equal(body.status, "completed");
+  assert.equal(body.download_url, "https://api.zenrows.com/v1/crawls/c_1/download");
+  assert.equal(
+    body.command,
+    `curl -sS -H "X-API-Key: $ZENROWS_API_KEY" -o c_1.jsonl 'https://api.zenrows.com/v1/crawls/c_1/download'`
+  );
+  assert.equal(body.command.includes("X-API-Key: k"), false);
+  assert.equal("path" in body, false);
+  assert.deepEqual(await readdir(dir), []);
+
+  const quoted = await withFetch(
+    () => jsonResponse({ ...crawl("completed"), results: [], next_cursor: null }),
+    () => handlers.crawl_download({ crawl_id: "c_1'; rm -rf ~; '" })
+  );
+  const cmd = JSON.parse(quoted.content[0].text).command as string;
+  assert.equal(cmd.split("'").length, 3, `the URL stays one quoted word: ${cmd}`);
 });

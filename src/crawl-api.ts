@@ -344,6 +344,19 @@ export async function getCrawlContent(
   return { contentType: res.headers.get("content-type") ?? "", body: await res.text() };
 }
 
+/** Where a crawl's download lives: every result as NDJSON, one line per kept URL. */
+export function crawlDownloadUrl(id: string): string {
+  return `${crawlBase()}${crawlPath(id)}/download`;
+}
+
+/**
+ * The crawl's download, unread: one JSON line per kept URL (`url`, `content_status`, and
+ * `content` once fetched). The X-Crawl-Status header carries the crawl's status when it was read.
+ */
+export function downloadCrawl(id: string, opts: CallOpts): Promise<Response> {
+  return crawlFetch("GET", `${crawlPath(id)}/download`, opts, "*/*");
+}
+
 /** A content id as given, or the last path segment of a result's content_url. */
 export function contentIdOf(content: string): string {
   return content.split(/[?#]/)[0].replace(/\/+$/, "").split("/").pop() ?? "";

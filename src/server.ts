@@ -75,7 +75,12 @@ export function buildScrapeParams(apiKey: string, params: ScrapeParams): URLSear
   return searchParams;
 }
 
-export function createServer(apiKey: string, clientName?: string): McpServer {
+export interface ServerOptions {
+  /** Served over HTTP (hosted): tools that would write to this machine's disk answer differently. */
+  hosted?: boolean;
+}
+
+export function createServer(apiKey: string, clientName?: string, options: ServerOptions = {}): McpServer {
   const server = new McpServer({
     name: "zenrows",
     version: pkg.version,
@@ -366,7 +371,7 @@ Examples:
 
   registerExtractTool(server, apiKey, getClientName);
   registerBatchTools(server, apiKey);
-  registerCrawlTools(server, apiKey);
+  registerCrawlTools(server, apiKey, { hosted: options.hosted });
   registerAccountTools(server, apiKey);
 
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";

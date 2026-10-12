@@ -207,7 +207,7 @@ app.all("/mcp", async (c) => {
     sessionIdGenerator: undefined, // stateless — no session tracking between requests
     enableJsonResponse: true, // return JSON instead of SSE (simpler for Lambda + most MCP clients)
   });
-  const server = createServer(apiKey, c.req.raw.headers.get("user-agent") ?? undefined);
+  const server = createServer(apiKey, c.req.raw.headers.get("user-agent") ?? undefined, { hosted: true });
   await server.connect(transport);
   const response = await transport.handleRequest(c.req.raw);
   await transport.close();
