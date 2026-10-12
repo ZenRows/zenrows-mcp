@@ -10,7 +10,7 @@ type Handler = (p: unknown) => Promise<{ content: { type: string; text: string }
 type Config = {
   description: string;
   inputSchema: z.ZodRawShape;
-  annotations: { destructiveHint: boolean; readOnlyHint: boolean; idempotentHint?: boolean };
+  annotations: { destructiveHint: boolean; readOnlyHint: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
 };
 
 function register(options?: CrawlToolOptions) {
@@ -68,6 +68,7 @@ test("registers the eight crawl tools, with only crawl_stop destructive and idem
   for (const [name, c] of Object.entries(configs)) {
     assert.equal(c.annotations.destructiveHint, name === "crawl_stop", name);
     assert.equal(c.annotations.readOnlyHint, !["crawl_create", "crawl_stop", "crawl_download"].includes(name), name);
+    assert.equal(c.annotations.openWorldHint, true, `${name} talks to the Crawl API, an open world`);
   }
   assert.equal(configs.crawl_stop.annotations.idempotentHint, true);
 });

@@ -141,7 +141,7 @@ export function registerCrawlTools(server: McpServer, apiKey: string, options: C
   server.registerTool(
     "crawl_create",
     {
-      annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
 
 ${WHEN_TO_USE}
@@ -214,7 +214,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
   server.registerTool(
     "crawl_get",
     {
-      annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
 completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
@@ -241,7 +241,7 @@ completed with stop_reason max_items / max_pages means a limit ended it; failed 
   server.registerTool(
     "crawl_results",
     {
-      annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `List the URLs a crawl kept, in the order it kept them, following the API's pages up to limit.
 
 Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url: pass it to crawl_content as content.
@@ -286,7 +286,7 @@ While the crawl runs the list is partial (partial=true): call again later with t
   server.registerTool(
     "crawl_content",
     {
-      annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
 
 Pass crawl_id and content: a content id, or content_url from a crawl_results row. Returns raw HTML,
@@ -332,7 +332,7 @@ markdown version of a page, use scrape on its URL instead.`,
   server.registerTool(
     "crawl_list",
     {
-      annotations: { title: "List Crawls", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "List Crawls", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description:
         "List this account's crawls, newest first, with status and coverage (no results). Pass next_cursor as cursor for the next page; next_cursor is absent on the last page.",
       inputSchema: {
@@ -354,7 +354,13 @@ markdown version of a page, use scrape on its URL instead.`,
   server.registerTool(
     "crawl_stop",
     {
-      annotations: { title: "Stop Crawl", readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+      annotations: {
+        title: "Stop Crawl",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
       description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
 Idempotent: a crawl that already ended answers with its final status. A 503 crawl_busy (the stop was not saved yet) is retried up to 3 times; if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
@@ -372,7 +378,7 @@ Idempotent: a crawl that already ended answers with its final status. A 503 craw
   server.registerTool(
     "crawl_wait",
     {
-      annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
@@ -406,7 +412,7 @@ Idempotent: a crawl that already ended answers with its final status. A 503 craw
   server.registerTool(
     "crawl_download",
     {
-      annotations: { title: "Download Crawl", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Download Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: `Save every result of a crawl to one local file, as JSON lines: url, content_status and, once fetched, content (the page). Returns the file's path and line count, not the results, so a crawl of any size costs one small reply. Read the file with your own tools.
 
 The file goes to path when given (a relative path resolves against ~/.zenrows/crawls), else ~/.zenrows/crawls/<crawl_id>.jsonl. An existing file is kept and the call fails with FILE_EXISTS unless overwrite is true.
