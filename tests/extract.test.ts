@@ -453,3 +453,49 @@ test("registerExtractTool's handler formats a failure outcome as isError content
   const payload = JSON.parse(result.content[0]!.text);
   assert.equal(payload.code, "INVALID_USAGE");
 });
+
+const NO_DATA = JSON.stringify({ code: "no_data_extracted", detail: "Extract found no data on this page.", status: 422 });
+
+test("runExtract reports 422 no_data_extracted as an empty result, in one call, without fallback", async () => {
+  const urls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    urls.push(String(input));
+    return new Response(NO_DATA, { status: 422, headers: { "content-type": "application/problem+json" } });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
+  assert.equal(urls.length, 1);
+  assert.match(urls[0]!, /extract=auto/);
+  assert.equal(outcome.mode, "auto");
+  assert.equal(outcome.fellBackToAutoparse, false);
+  assert.equal(outcome.empty, true);
+  assert.equal(outcome.noDataExtracted, true);
+  assert.equal(outcome.data, null);
+  assert.match(outcome.message ?? "", /no data/i);
+});
+
+test("runExtract keeps other 422s as errors", async () => {
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify({ code: "RESP001", detail: "Could not get content." }), {
+      status: 422,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal((JSON.parse(outcome.errorText) as { code: string }).code, "RESP001");
+});
+
+test("a 422 no_data_extracted in autoparse mode stays an error", async () => {
+  const fetchImpl = (async () =>
+    new Response(NO_DATA, { status: 422, headers: { "content-type": "application/json" } })) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com", mode: "autoparse" }, { fetchImpl });
+
+  assert.equal(outcome.ok, false);
+});

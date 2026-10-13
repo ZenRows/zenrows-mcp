@@ -51,6 +51,19 @@ function isExtractUnavailable(status: number, body: string): boolean {
   return (status === 402 && code === "AUTH010") || (status === 403 && code === "REQS007");
 }
 
+/**
+ * 422 `no_data_extracted` on extract=auto: Extract knows this kind of page but none
+ * of the fields came back filled. It is an answer, not a failure to reach the site,
+ * and the request is not charged.
+ */
+function isNoDataExtracted(status: number, body: string): boolean {
+  return status === 422 && zrErrorCode(body)?.toLowerCase() === "no_data_extracted";
+}
+
+const NO_DATA_MESSAGE =
+  "Extract found no data on this page (not charged). Check that the page rendered fully: " +
+  "set js_render with wait_for, or premium_proxy on protected sites.";
+
 export type ExtractMode = "auto" | "autoparse" | "css";
 
 export type ExtractStealthOpts = {
@@ -77,6 +90,9 @@ export type ExtractSuccess = {
   data: unknown;
   html?: string;
   raw?: string;
+  /** Set when Extract answered 422 no_data_extracted; `empty` is true too. */
+  noDataExtracted?: boolean;
+  message?: string;
 };
 
 export type ExtractFailure = {
@@ -190,6 +206,18 @@ export async function runExtract(
     );
   }
 
+  if (usedMode === "auto" && isNoDataExtracted(result.status, result.body)) {
+    return {
+      ok: true,
+      mode: usedMode,
+      fellBackToAutoparse,
+      empty: true,
+      data: null,
+      noDataExtracted: true,
+      message: NO_DATA_MESSAGE,
+    };
+  }
+
   if (!result.ok) {
     return {
       ok: false,
@@ -277,6 +305,8 @@ Set js_render or premium_proxy only to force a fixed configuration; that turns
 Adaptive Stealth Mode off and bills every request at that configuration's cost.
 
 Check "empty" in the result: true means no field came back with a value.
+"noDataExtracted": true means Extract processed the page and found nothing to
+extract (not charged); retrying the same request returns the same answer.
 Full-page markdown, HTML and screenshots come from scrape.`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to extract from"),
@@ -349,6 +379,7 @@ Full-page markdown, HTML and screenshots come from scrape.`,
         data: outcome.data,
         ...(outcome.html !== undefined ? { html: outcome.html } : {}),
         ...(outcome.raw !== undefined ? { raw: outcome.raw } : {}),
+        ...(outcome.noDataExtracted ? { noDataExtracted: true, message: outcome.message } : {}),
       });
     }
   );
