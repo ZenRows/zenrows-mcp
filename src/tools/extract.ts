@@ -259,6 +259,7 @@ export function registerExtractTool(server: McpServer, apiKey: string, getClient
         title: "Extract Structured Data",
         readOnlyHint: true,
         destructiveHint: false,
+        openWorldHint: true,
       },
       description: `Extract structured data from a webpage via Zenrows.
 

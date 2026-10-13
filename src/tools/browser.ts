@@ -41,6 +41,7 @@ export function registerBrowserTools(
         title: "Open Browser & Navigate",
         readOnlyHint: false,
         destructiveHint: false,
+        openWorldHint: true,
       },
       description: `Open a Zenrows Browser Sessions session and navigate to a URL.
 
@@ -109,7 +110,7 @@ When to use options:
   server.registerTool(
     "browser_close",
     {
-      annotations: { title: "Close Browser Session", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Close Browser Session", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description:
         "Close a browser session and free all associated resources, including the concurrency slot it holds.",
       inputSchema: { session_id: sessionId },
@@ -131,7 +132,7 @@ When to use options:
   server.registerTool(
     "browser_go_back",
     {
-      annotations: { title: "Go Back", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Go Back", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Navigate back to the previous page in the browser history.",
       inputSchema: { session_id: sessionId },
     },
@@ -150,7 +151,7 @@ When to use options:
   server.registerTool(
     "browser_go_forward",
     {
-      annotations: { title: "Go Forward", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Go Forward", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Navigate forward to the next page in the browser history.",
       inputSchema: { session_id: sessionId },
     },
@@ -169,7 +170,7 @@ When to use options:
   server.registerTool(
     "browser_reload",
     {
-      annotations: { title: "Reload Page", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Reload Page", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Reload the current page.",
       inputSchema: { session_id: sessionId },
     },
@@ -190,7 +191,7 @@ When to use options:
   server.registerTool(
     "browser_click",
     {
-      annotations: { title: "Click Element", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Click Element", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Click an element on the page using a CSS selector.",
       inputSchema: {
         session_id: sessionId,
@@ -212,7 +213,7 @@ When to use options:
   server.registerTool(
     "browser_hover",
     {
-      annotations: { title: "Hover Element", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Hover Element", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Move the mouse cursor over an element to trigger hover effects.",
       inputSchema: {
         session_id: sessionId,
@@ -234,7 +235,7 @@ When to use options:
   server.registerTool(
     "browser_type",
     {
-      annotations: { title: "Type Text", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Type Text", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Type text into an input element. Appends to existing content unless clear_first is set.",
       inputSchema: {
         session_id: sessionId,
@@ -262,7 +263,7 @@ When to use options:
   server.registerTool(
     "browser_fill",
     {
-      annotations: { title: "Fill Input", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Fill Input", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Clear an input field and set its value, replacing what was there (browser_type appends instead).",
       inputSchema: {
         session_id: sessionId,
@@ -288,7 +289,7 @@ When to use options:
   server.registerTool(
     "browser_select_option",
     {
-      annotations: { title: "Select Option", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Select Option", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Select an option from a <select> dropdown element.",
       inputSchema: {
         session_id: sessionId,
@@ -314,7 +315,7 @@ When to use options:
   server.registerTool(
     "browser_check",
     {
-      annotations: { title: "Check Checkbox", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Check Checkbox", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Check a checkbox or radio button.",
       inputSchema: {
         session_id: sessionId,
@@ -336,7 +337,7 @@ When to use options:
   server.registerTool(
     "browser_uncheck",
     {
-      annotations: { title: "Uncheck Checkbox", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Uncheck Checkbox", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Uncheck a checkbox.",
       inputSchema: {
         session_id: sessionId,
@@ -358,7 +359,7 @@ When to use options:
   server.registerTool(
     "browser_focus",
     {
-      annotations: { title: "Focus Element", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Focus Element", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Move focus to an element, triggering focus-dependent UI changes.",
       inputSchema: {
         session_id: sessionId,
@@ -380,7 +381,7 @@ When to use options:
   server.registerTool(
     "browser_press_key",
     {
-      annotations: { title: "Press Key", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Press Key", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: 'Press a keyboard key. Examples: "Enter", "Tab", "Escape", "ArrowDown", "Control+a".',
       inputSchema: {
         session_id: sessionId,
@@ -402,7 +403,7 @@ When to use options:
   server.registerTool(
     "browser_scroll",
     {
-      annotations: { title: "Scroll Page", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Scroll Page", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Scroll the page in a given direction.",
       inputSchema: {
         session_id: sessionId,
@@ -428,7 +429,7 @@ When to use options:
   server.registerTool(
     "browser_drag",
     {
-      annotations: { title: "Drag Element", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Drag Element", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Drag an element from its current position to a target element.",
       inputSchema: {
         session_id: sessionId,
@@ -456,7 +457,7 @@ When to use options:
   server.registerTool(
     "browser_get_accessibility_tree",
     {
-      annotations: { title: "Get Accessibility Tree", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Accessibility Tree", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Get the ARIA accessibility tree of the current page as readable text.
 
 Shows the page structure and the selectors needed to interact with elements, in
@@ -482,7 +483,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_url",
     {
-      annotations: { title: "Get Current URL", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Current URL", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get the current URL of the browser session.",
       inputSchema: { session_id: sessionId },
     },
@@ -501,7 +502,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_title",
     {
-      annotations: { title: "Get Page Title", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Page Title", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get the title of the current page.",
       inputSchema: { session_id: sessionId },
     },
@@ -520,7 +521,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_text",
     {
-      annotations: { title: "Get Text Content", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Text Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get the visible text content of an element or the entire page body.",
       inputSchema: {
         session_id: sessionId,
@@ -545,7 +546,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_attribute",
     {
-      annotations: { title: "Get Element Attribute", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Element Attribute", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get the value of a specific attribute on an element.",
       inputSchema: {
         session_id: sessionId,
@@ -571,7 +572,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_html",
     {
-      annotations: { title: "Get HTML", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get HTML", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get the HTML source of an element or the full page.",
       inputSchema: {
         session_id: sessionId,
@@ -600,6 +601,7 @@ labels, and states — everything needed to drive browser interactions.`,
         title: "Query All Matching Elements",
         readOnlyHint: true,
         destructiveHint: false,
+        openWorldHint: true,
       },
       description: "Find all elements matching a CSS selector and return their text, HTML, and attributes.",
       inputSchema: {
@@ -626,15 +628,12 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_screenshot",
     {
-      annotations: { title: "Take Screenshot", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Take Screenshot", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description:
         "Take a screenshot of the current page or a specific element. Use for visual verification or when the accessibility tree is not sufficient.",
       inputSchema: {
         session_id: sessionId,
-        full_page: z
-          .boolean()
-          .nullish()
-          .describe("Capture full page including content below the fold (default false)"),
+        full_page: z.boolean().nullish().describe("Capture full page including content below the fold (default false)"),
         selector: z
           .string()
           .nullish()
@@ -668,7 +667,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_generate_pdf",
     {
-      annotations: { title: "Generate PDF", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Generate PDF", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Render the current page as a PDF document.",
       inputSchema: {
         session_id: sessionId,
@@ -710,7 +709,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_wait_for_selector",
     {
-      annotations: { title: "Wait for Element", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Wait for Element", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description:
         "Wait until an element matching the CSS selector is stable in the DOM. Set visible=true to also require the element to be visible (not hidden).",
       inputSchema: {
@@ -740,7 +739,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_wait_for_navigation",
     {
-      annotations: { title: "Wait for Navigation", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Wait for Navigation", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description:
         "Wait for the page to navigate to a new URL. It waits for the next navigation event, so a navigation that already finished is not seen and the call waits until timeout_ms. Pages that update without changing URL (AJAX/SPA) fire no navigation event. Optional timeout_ms (default 30000ms).",
       inputSchema: {
@@ -773,7 +772,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_wait",
     {
-      annotations: { title: "Wait", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Wait", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Wait for a fixed duration. browser_wait_for_selector waits only until an element appears.",
       inputSchema: {
         session_id: sessionId,
@@ -797,7 +796,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_evaluate",
     {
-      annotations: { title: "Evaluate JavaScript", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Evaluate JavaScript", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Execute JavaScript in the browser context and return the result.",
       inputSchema: {
         session_id: sessionId,
@@ -821,7 +820,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_get_cookies",
     {
-      annotations: { title: "Get Cookies", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Get Cookies", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get all cookies for the current page.",
       inputSchema: { session_id: sessionId },
     },
@@ -840,7 +839,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_set_cookies",
     {
-      annotations: { title: "Set Cookies", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Set Cookies", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Set one or more cookies in the browser session.",
       inputSchema: {
         session_id: sessionId,
@@ -878,7 +877,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_clear_cookies",
     {
-      annotations: { title: "Clear Cookies", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Clear Cookies", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Clear all cookies for the current browser session.",
       inputSchema: { session_id: sessionId },
     },
@@ -899,7 +898,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_local_storage",
     {
-      annotations: { title: "Local Storage", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Local Storage", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Read, write, or clear localStorage in the current page context.",
       inputSchema: {
         session_id: sessionId,
@@ -929,7 +928,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_new_tab",
     {
-      annotations: { title: "Open New Tab", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Open New Tab", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Open a new browser tab. Returns a tab_id to use with browser_switch_tab.",
       inputSchema: {
         session_id: sessionId,
@@ -951,7 +950,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_switch_tab",
     {
-      annotations: { title: "Switch Tab", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Switch Tab", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: "Switch focus to a different browser tab.",
       inputSchema: {
         session_id: sessionId,
@@ -1221,6 +1220,7 @@ labels, and states — everything needed to drive browser interactions.`,
         title: "Run Batch of Browser Actions",
         readOnlyHint: false,
         destructiveHint: false,
+        openWorldHint: true,
       },
       description: `Execute a sequence of browser actions in a single call against an existing session.
 

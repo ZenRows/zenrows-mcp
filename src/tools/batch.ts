@@ -98,7 +98,7 @@ export function registerBatchTools(server: McpServer, apiKey: string): void {
   server.registerTool(
     "batch_create",
     {
-      annotations: { title: "Create Batch Job", readOnlyHint: false, destructiveHint: false },
+      annotations: { title: "Create Batch Job", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: `Submit a cloud Batch job that fans out many URLs asynchronously (Zenrows Batch API beta).
 
 NOT the same as browser_batch — this hits https://async.api.zenrows.com/v1 with X-API-Key.
@@ -230,7 +230,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
   server.registerTool(
     "batch_status",
     {
-      annotations: { title: "Batch Job Status", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Batch Job Status", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: "Get status and stats for a Zenrows Batch job (latest_run.status + latest_run.stats).",
       inputSchema: {
         job_id: z.string().describe("Batch job id returned by batch_create"),
@@ -256,7 +256,7 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
   server.registerTool(
     "batch_results",
     {
-      annotations: { title: "Batch Job Results", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Batch Job Results", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `List result rows for a Batch job (cursor-paginated server-side; returns the full list).
 
 Each row may include task_id, external_id, status, and a short-lived result_url for the body.
@@ -279,7 +279,7 @@ Download result_url soon — presigned links expire.`,
   server.registerTool(
     "batch_cancel",
     {
-      annotations: { title: "Cancel Batch Job", readOnlyHint: false, destructiveHint: true },
+      annotations: { title: "Cancel Batch Job", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       description: "Stop an in-flight Batch job run (POST /jobs/:id/stop).",
       inputSchema: {
         job_id: z.string().describe("Batch job id to stop"),
@@ -305,7 +305,7 @@ Download result_url soon — presigned links expire.`,
   server.registerTool(
     "batch_wait",
     {
-      annotations: { title: "Wait for Batch Job", readOnlyHint: true, destructiveHint: false },
+      annotations: { title: "Wait for Batch Job", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description:
         "Poll batch_status until the job reaches a terminal state (completed, failed, stopped, or deleted). A run that hits an API key credit cap ends as failed with failure_reason api_key_cap_reached.",
       inputSchema: {
