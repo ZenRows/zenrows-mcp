@@ -304,10 +304,19 @@ export function problemToError(
           "Crawl not found for this account. Check the crawl_id (crawl_list shows the account's crawls)."
         );
   }
-  if (status === 429) {
+  if (status === 429 && serverCode === "too_many_crawls") {
     return error(
       "CRAWL_TOO_MANY_CRAWLS",
       "The account has reached its limit of active jobs (3 by default), shared with its Batch jobs. Wait for a crawl or Batch job to finish, or stop one with crawl_stop or batch_cancel, then retry after retry_after seconds.",
+      retryAfter
+    );
+  }
+  if (status === 429) {
+    // The Crawl API sends 429 only on create, as too_many_crawls. Any other 429 comes from
+    // something in front of it and says nothing about active jobs.
+    return error(
+      "CRAWL_RATE_LIMITED",
+      `The Crawl API is rate limiting requests. ${retryAfter !== undefined ? `Retry after ${retryAfter} seconds.` : "Retry later."}`,
       retryAfter
     );
   }

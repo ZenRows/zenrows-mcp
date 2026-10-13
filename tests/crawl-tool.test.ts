@@ -586,6 +586,40 @@ test("crawl_stop POSTs stop and returns the status", async () => {
   });
 });
 
+test("crawl_create returns 429 too_many_crawls as CRAWL_TOO_MANY_CRAWLS; crawl_stop returns another 429 as CRAWL_RATE_LIMITED", async () => {
+  const { handlers } = register();
+  const created = await withFetch(
+    () =>
+      new Response(JSON.stringify({ code: "too_many_crawls", title: "Too many crawls", status: 429 }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "30" },
+      }),
+    () => handlers.crawl_create({ url: "https://example.com/" })
+  );
+  const createBody = JSON.parse(created.content[0].text);
+  assert.equal(created.isError, true);
+  assert.equal(createBody.code, "CRAWL_TOO_MANY_CRAWLS");
+  assert.equal(createBody.retry_after, 30);
+
+  let stopCalls = 0;
+  const stopped = await withFetch(
+    () => {
+      stopCalls++;
+      return new Response(JSON.stringify({ title: "Too Many Requests", status: 429 }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "0" },
+      });
+    },
+    () => handlers.crawl_stop({ crawl_id: "c_1" })
+  );
+  const stopBody = JSON.parse(stopped.content[0].text);
+  assert.equal(stopped.isError, true);
+  assert.equal(stopBody.code, "CRAWL_RATE_LIMITED");
+  assert.equal(stopBody.retry_after, 0);
+  assert.doesNotMatch(stopBody.message, /Nothing was created|active jobs/);
+  assert.equal(stopCalls, 4, "crawl_stop still retries a 429 three times");
+});
+
 test("crawl_list passes cursor and limit and reports next_cursor null on the last page", async () => {
   const { handlers } = register();
   const urls: string[] = [];

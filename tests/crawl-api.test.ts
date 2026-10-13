@@ -391,7 +391,7 @@ test("a create with an idempotency key is retried on 503", async (t) => {
 test("a create is never retried on 429, even with an idempotency key", async () => {
   const { calls, fetchImpl } = sequence([429], { "retry-after": "1" });
   await assert.rejects(createCrawl(createBody, { apiKey: "k", fetchImpl, idempotencyKey: "key-1" }), (e: unknown) => {
-    return e instanceof CrawlError && e.code === "CRAWL_TOO_MANY_CRAWLS" && e.retryAfter === 1;
+    return e instanceof CrawlError && e.status === 429 && e.retryAfter === 1;
   });
   assert.equal(calls.length, 1);
 });
@@ -429,7 +429,7 @@ test("stop waits the Retry-After seconds on a 429", async (t) => {
 test("stop gives up after 3 retries and maps the last error", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   for (const [status, code] of [
-    [429, "CRAWL_TOO_MANY_CRAWLS"],
+    [429, "CRAWL_RATE_LIMITED"],
     [502, "CRAWL_FAILED"],
     [503, "CRAWL_FAILED"],
     [504, "CRAWL_FAILED"],
@@ -439,6 +439,30 @@ test("stop gives up after 3 retries and maps the last error", async (t) => {
       return e instanceof CrawlError && e.code === code && e.status === status;
     });
     assert.equal(calls.length, 4, `${status}: 1 try and 3 retries`);
+  }
+});
+
+test("a 429 without too_many_crawls on stop maps to CRAWL_RATE_LIMITED after the retries, not to the active-job limit", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const payload of [
+    { code: "rate_limited", status: 429 },
+    { title: "Too Many Requests", status: 429 },
+  ]) {
+    let n = 0;
+    const fetchImpl = (async () => {
+      n++;
+      return jsonResponse(payload, 429, { "retry-after": "7" });
+    }) as typeof fetch;
+    await assert.rejects(settle(t, stopCrawl("c_1", { apiKey: "k", fetchImpl })), (e: unknown) => {
+      assert.ok(e instanceof CrawlError);
+      assert.equal(e.code, "CRAWL_RATE_LIMITED");
+      assert.equal(e.retryAfter, 7);
+      assert.equal(e.toJSON().retry_after, 7);
+      assert.equal(e.message, "The Crawl API is rate limiting requests. Retry after 7 seconds.");
+      assert.doesNotMatch(e.message, /Nothing was created|active jobs/);
+      return true;
+    });
+    assert.equal(n, 4, "1 try and 3 retries");
   }
 });
 
