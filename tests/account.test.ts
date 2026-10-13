@@ -146,3 +146,20 @@ test("registers exactly one read-only tool named account_usage", () => {
   assert.equal(registered[0].name, "account_usage");
   assert.equal(registered[0].config.annotations?.readOnlyHint, true);
 });
+
+test("the description links to no checkout or upgrade page", () => {
+  // Directory rules (https://developers.openai.com/plugins/plugin-guidelines, Commerce and
+  // monetization): a tool may link to an informational page about plans, never to one
+  // that starts a purchase or an upgrade.
+  let description = "";
+  const server = {
+    registerTool: (_name: string, config: { description?: string }) => {
+      description = config.description ?? "";
+    },
+  };
+
+  registerAccountTools(server as never, "k");
+
+  assert.doesNotMatch(description, /app\.zenrows\.com\/(billing|plans)/);
+  assert.match(description, /https:\/\/www\.zenrows\.com\/pricing/);
+});
