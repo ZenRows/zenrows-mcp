@@ -99,6 +99,7 @@ export function createServer(apiKey: string, clientName?: string, options: Serve
         title: "Scrape Webpage",
         readOnlyHint: true,
         destructiveHint: false,
+        openWorldHint: true,
       },
       description: `Scrape any webpage and return its content using Zenrows (Fetch).
 
