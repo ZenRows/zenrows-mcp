@@ -120,6 +120,12 @@ function waitedOut(crawl: Crawl, firstUrls?: string[]): { content: TextContent[]
   });
 }
 
+/** One line for a crawl_wait progress notification, e.g. "running: 12 pages fetched, 30 URLs kept". */
+function progressMessage(crawl: Crawl): string {
+  const c = crawl.coverage;
+  return `${crawl.status}: ${c?.pages_fetched ?? 0} pages fetched, ${c?.items_found ?? 0} URLs kept`;
+}
+
 const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
 the URLs behind it, optionally with each page's HTML. For a single page, use scrape.`;
 
@@ -386,7 +392,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
     "crawl_wait",
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.`,
+      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z
@@ -400,9 +406,22 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
           ),
       },
     },
-    async ({ crawl_id, timeout }) => {
+    async ({ crawl_id, timeout }, extra) => {
+      // Progress goes only to a client that asked for it with a progressToken.
+      const progressToken = extra?._meta?.progressToken;
+      const onPoll =
+        progressToken === undefined
+          ? undefined
+          : (crawl: Crawl, poll: number) =>
+              extra
+                .sendNotification({
+                  method: "notifications/progress",
+                  params: { progressToken, progress: poll, message: progressMessage(crawl) },
+                })
+                // A lost progress notification must not end the wait.
+                .catch(() => undefined);
       try {
-        const crawl = await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined });
+        const crawl = await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined, onPoll });
         if (!isTerminal(crawl.status) || !crawl.coverage?.items_found) return waitedOut(crawl);
         // The first URLs are a preview; a failed read of them must not hide that the crawl ended.
         const first = await getCrawl(crawl_id, { ...call, limit: WAIT_URLS }).catch(() => undefined);

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { z } from "zod";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { JSONRPCMessage, Progress } from "@modelcontextprotocol/sdk/types.js";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -372,6 +376,71 @@ test("crawl_wait takes timeout in seconds and returns the running crawl when it 
   assert.deepEqual(Object.keys(body), ["ok", "crawl_id", "status", "crawl", "note"]);
   assert.equal(body.status, "running");
   assert.match(body.note, /call crawl_wait again/i);
+});
+
+/** crawl_wait through a real MCP client: the crawl runs for two polls, then completes. */
+async function waitOverMcp(t: TestContext, onprogress?: (p: Progress) => void) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerCrawlTools(server, "k");
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const sent: JSONRPCMessage[] = [];
+  const send = serverTransport.send.bind(serverTransport);
+  serverTransport.send = (message, options) => {
+    sent.push(message);
+    return send(message, options);
+  };
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await client.connect(clientTransport);
+  let polls = 0;
+  try {
+    await withFetch(
+      () => {
+        polls++;
+        const status = polls <= 2 ? "running" : "completed";
+        const c = crawl(status);
+        return jsonResponse({
+          ...c,
+          coverage: { pages_fetched: polls * 3, pages_failed: 0, items_found: polls * 5 },
+          results: [],
+          next_cursor: status === "running" ? "x" : null,
+        });
+      },
+      async () => {
+        let done = false;
+        const call = client.callTool({ name: "crawl_wait", arguments: { crawl_id: "c_1", timeout: 60 } }, undefined, {
+          onprogress,
+        });
+        call.finally(() => (done = true)).catch(() => undefined);
+        while (!done) {
+          for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+          t.mock.timers.tick(1_000);
+        }
+        const out = (await call) as { content: { text: string }[] };
+        assert.equal(JSON.parse(out.content[0].text).status, "completed");
+      }
+    );
+  } finally {
+    await client.close();
+  }
+  return sent.filter((m) => "method" in m && m.method === "notifications/progress");
+}
+
+test("crawl_wait sends a progress notification after each poll when the call carries a progressToken", async (t) => {
+  const seen: Progress[] = [];
+  const sent = await waitOverMcp(t, (p) => seen.push(p));
+  assert.equal(sent.length, 3, "one notification per poll");
+  assert.deepEqual(
+    seen.map((p) => p.progress),
+    [1, 2, 3]
+  );
+  assert.equal(seen[0].message, "running: 3 pages fetched, 5 URLs kept");
+  assert.equal(seen[2].message, "completed: 9 pages fetched, 15 URLs kept");
+});
+
+test("crawl_wait sends no progress notification without a progressToken", async (t) => {
+  assert.equal((await waitOverMcp(t)).length, 0);
 });
 
 test("crawl_results takes cursor and limit, and caps limit at 10000", async () => {

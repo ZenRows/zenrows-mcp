@@ -450,15 +450,21 @@ export async function readResults(
 /**
  * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal or
  * `timeout` seconds run out. Running out is not an error: it returns the crawl, still running.
+ * `onPoll` runs after each poll with the crawl and the poll's number, counted from 1.
  */
 export async function waitForCrawl(
   id: string,
-  opts: CallOpts & { timeout?: number; pollDelayMs?: number }
+  opts: CallOpts & {
+    timeout?: number;
+    pollDelayMs?: number;
+    onPoll?: (crawl: Crawl, poll: number) => void | Promise<void>;
+  }
 ): Promise<Crawl> {
   const deadline = Date.now() + (opts.timeout ?? DEFAULT_WAIT_SECONDS) * 1000;
   let delay = opts.pollDelayMs ?? 2000;
-  for (;;) {
+  for (let poll = 1; ; poll++) {
     const crawl = await getCrawl(id, { ...opts, limit: 1 });
+    await opts.onPoll?.(withoutResults(crawl), poll);
     if (isTerminal(crawl.status) || Date.now() + delay > deadline) return withoutResults(crawl);
     await new Promise<void>((r) => setTimeout(r, delay));
     delay = Math.min(delay * 1.5, 15_000);
