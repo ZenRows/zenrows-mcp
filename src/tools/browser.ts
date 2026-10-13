@@ -46,7 +46,7 @@ export function registerBrowserTools(
       description: `Open a Zenrows Browser Sessions session and navigate to a URL.
 
 This is the entry point for all browser automation. It creates a new session backed by
-Zenrows' anti-bot infrastructure and navigates to the given URL in one step.
+Zenrows' hosted browser infrastructure and navigates to the given URL in one step.
 
 Returns a session_id that every other browser_* tool takes. The session holds one
 concurrency slot until browser_close closes it.

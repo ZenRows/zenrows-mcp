@@ -104,12 +104,12 @@ export function registerBatchTools(server: McpServer, apiKey: string): void {
 NOT the same as browser_batch — this hits https://async.api.zenrows.com/v1 with X-API-Key.
 Suited to large URL lists; scrape and extract handle single pages.
 
-Tasks use Adaptive Stealth Mode (mode=auto) by default: Zenrows enables JS
+Tasks use automatic mode (mode=auto) by default: Zenrows enables JS
 rendering and premium proxies only on the pages that need them, and charges
-only for the configuration that succeeds. Pass just the URLs for protected or
-dynamic sites. Set js_render or premium_proxy (job-level or in a task's
-zenrows_params) only to force a fixed configuration; that turns Adaptive Stealth
-Mode off for the affected tasks and bills them at that configuration's cost.
+only for the configuration that succeeds. Pass just the URLs. Set js_render or
+premium_proxy (job-level or in a task's zenrows_params) only to force a fixed
+configuration; that turns automatic mode off for the affected tasks and bills
+them at that configuration's cost.
 
 Returns job_id + latest_run.status/stats. batch_status and batch_wait report progress; batch_results lists the results.
 If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
@@ -126,25 +126,23 @@ If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
           .boolean()
           .nullish()
           .describe(
-            "Force js_render on all tasks. Overrides Adaptive Stealth Mode, which already renders when needed."
+            "Force js_render on all tasks. Overrides automatic mode (mode=auto), which already renders when needed."
           ),
         premium_proxy: z
           .boolean()
           .nullish()
           .describe(
-            "Force premium_proxy on all tasks (10x cost). Overrides Adaptive Stealth Mode, which already escalates when a site blocks."
+            "Force premium_proxy on all tasks (10x cost). Overrides automatic mode (mode=auto), which already uses premium proxies when a page needs them."
           ),
         mode_auto: z
           .boolean()
           .nullish()
-          .describe(
-            "Adaptive Stealth Mode (mode=auto) is on by default; leave unset. False sends plain requests without it."
-          ),
+          .describe("Automatic mode (mode=auto) is on by default; leave unset. False sends plain requests without it."),
         proxy_country: z
           .string()
           .nullish()
           .describe(
-            "Job-level ISO country code. Works in Adaptive Stealth Mode; with js_render alone it requires premium_proxy."
+            "Job-level ISO country code. Works in automatic mode (mode=auto); with js_render alone it requires premium_proxy."
           ),
         response_type: z.enum(["markdown", "plaintext", "html", "pdf"]).nullish().describe("Job-level response_type"),
         zenrows_params: z

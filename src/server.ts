@@ -107,14 +107,12 @@ Returns full-page content (markdown/HTML/PDF/screenshot). For structured JSON
 fields (products, articles, listings), the extract tool returns parsed fields
 instead of a full page body.
 
-By default the request uses Adaptive Stealth Mode: Zenrows picks JS rendering
-and premium proxies per page, escalates only when the site blocks, and charges
-only for the configuration that succeeds. Pass just the URL for protected,
-dynamic, or blocked pages; js_render and premium_proxy are not needed to get past
-a block.
+By default the request uses automatic mode (mode=auto): Zenrows adds JS rendering
+or premium proxies per page only when a plain request does not return the page,
+and charges only for the configuration that succeeds. Pass just the URL.
 
 Set js_render or premium_proxy only to force a fixed configuration. Doing so
-switches off Adaptive Stealth Mode, and every request is billed at that
+switches off automatic mode, and every request is billed at that
 configuration's cost (premium_proxy with js_render is 25x a basic request).
 
 Examples:
@@ -128,7 +126,7 @@ Examples:
           .boolean()
           .nullish()
           .describe(
-            "Force JavaScript rendering on every request. Overrides Adaptive Stealth Mode, " +
+            "Force JavaScript rendering on every request. Overrides automatic mode (mode=auto), " +
               "which already renders JavaScript when a page needs it. Leave unset unless you need a fixed configuration."
           ),
 
@@ -137,7 +135,7 @@ Examples:
           .nullish()
           .describe(
             "Force premium residential proxies on every request (10x credit cost). Overrides " +
-              "Adaptive Stealth Mode, which already escalates to premium proxies when a site blocks. " +
+              "automatic mode (mode=auto), which already uses premium proxies when a page needs them. " +
               "Leave unset unless you need a fixed configuration."
           ),
 
@@ -146,7 +144,7 @@ Examples:
           .nullish()
           .describe(
             "Country for geo-targeted scraping. ISO 3166-1 alpha-2 code (e.g. 'US', 'GB', 'DE'). " +
-              "Works in Adaptive Stealth Mode; if you set js_render without premium_proxy, it requires premium_proxy=true."
+              "Works in automatic mode (mode=auto); if you set js_render without premium_proxy, it requires premium_proxy=true."
           ),
 
         response_type: z
@@ -183,7 +181,7 @@ Examples:
           .nullish()
           .describe(
             "CSS selector to wait for before capturing. Use when key content loads " +
-              "after the initial page render. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+              "after the initial page render. Requires js_render=true; without it, including in automatic mode, it may be ignored."
           ),
 
         wait: z
@@ -194,15 +192,15 @@ Examples:
           .nullish()
           .describe(
             "Milliseconds to wait after page load before capturing content. " +
-              "Max 30000 (30s). Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+              "Max 30000 (30s). Requires js_render=true; without it, including in automatic mode, it may be ignored."
           ),
 
         js_instructions: z
           .string()
           .nullish()
           .describe(
-            "JSON array of browser interactions to run before scraping. Works in Adaptive Stealth Mode (the page is then " +
-              "rendered and billed at the JS rendering rate) or with js_render=true. " +
+            "JSON array of browser interactions to run before scraping. Works in automatic mode (mode=auto), which then " +
+              "renders the page and bills it at the JS rendering rate, or with js_render=true. " +
               'Example: [{"click":"#load-more"},{"wait":1000},{"wait_for":".results"}]'
           ),
 
@@ -363,7 +361,7 @@ Examples:
           role: "user",
           content: {
             type: "text",
-            text: `Scrape ${url} using the Zenrows MCP scrape tool. Pass only the URL: Adaptive Stealth Mode renders JavaScript when the page needs it. Return the full rendered content in markdown format.`,
+            text: `Scrape ${url} using the Zenrows MCP scrape tool. Pass only the URL: automatic mode (mode=auto) renders JavaScript when the page needs it. Return the full rendered content in markdown format.`,
           },
         },
       ],

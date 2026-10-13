@@ -271,11 +271,11 @@ Modes:
 - autoparse: general-purpose structured JSON on any domain
 - css: css_extractor with an explicit selector map
 
-Requests use Adaptive Stealth Mode by default: Zenrows enables JS rendering and
+Requests use automatic mode (mode=auto) by default: Zenrows enables JS rendering and
 premium proxies only when the site needs them, and charges only for the
-configuration that succeeds. Pass just the URL for protected or dynamic pages.
+configuration that succeeds. Pass just the URL.
 Set js_render or premium_proxy only to force a fixed configuration; that turns
-Adaptive Stealth Mode off and bills every request at that configuration's cost.
+automatic mode off and bills every request at that configuration's cost.
 
 Check "empty" in the result: true means no field came back with a value.
 Full-page markdown, HTML and screenshots come from scrape.`,
@@ -294,32 +294,32 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .boolean()
           .nullish()
           .describe(
-            "Force JS rendering on every request. Overrides Adaptive Stealth Mode, which already renders when needed."
+            "Force JS rendering on every request. Overrides automatic mode (mode=auto), which already renders when needed."
           ),
         premium_proxy: z
           .boolean()
           .nullish()
           .describe(
-            "Force premium residential proxies on every request (10x cost). Overrides Adaptive Stealth Mode, " +
-              "which already escalates to premium proxies when a site blocks."
+            "Force premium residential proxies on every request (10x cost). Overrides automatic mode (mode=auto), " +
+              "which already uses premium proxies when a page needs them."
           ),
         proxy_country: z
           .string()
           .nullish()
           .describe(
-            "ISO 3166-1 alpha-2 country code. Works in Adaptive Stealth Mode; with js_render or mode_auto=false it requires premium_proxy."
+            "ISO 3166-1 alpha-2 country code. Works in automatic mode (mode=auto); with js_render or mode_auto=false it requires premium_proxy."
           ),
         mode_auto: z
           .boolean()
           .nullish()
           .describe(
-            "Adaptive Stealth Mode (mode=auto) is on by default; leave unset. False sends a plain request without it."
+            "Automatic mode (mode=auto) is on by default; leave unset. False sends a plain request without it."
           ),
         wait_for: z
           .string()
           .nullish()
           .describe(
-            "CSS selector to wait for before extracting. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+            "CSS selector to wait for before extracting. Requires js_render=true; without it, including in automatic mode, it may be ignored."
           ),
         wait: z
           .number()
@@ -328,7 +328,7 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .max(30000)
           .nullish()
           .describe(
-            "Milliseconds to wait after load. Requires js_render=true; without it, including in Adaptive Stealth Mode, it may be ignored."
+            "Milliseconds to wait after load. Requires js_render=true; without it, including in automatic mode, it may be ignored."
           ),
         fallback_autoparse: z
           .boolean()
