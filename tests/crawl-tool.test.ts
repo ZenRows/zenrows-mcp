@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { z } from "zod";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { JSONRPCMessage, Progress } from "@modelcontextprotocol/sdk/types.js";
 import { writeFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -80,11 +84,27 @@ test("crawl_create's output_format accepts only html", () => {
   assert.equal(schema.safeParse({ ...base, output_format: "html" }).success, true);
   assert.equal(schema.safeParse(base).success, true);
   assert.equal(schema.safeParse({ ...base, output_format: "json" }).success, false);
-  assert.equal(schema.safeParse({ url: "https://example.com/" }).success, false, "depth is required");
+  assert.equal(schema.safeParse({ url: "https://example.com/" }).success, true, "depth is optional");
+  assert.equal(schema.safeParse({ ...base, depth: null }).success, true, "null depth means no depth limit");
   // The API judges the lower bound: depth 0 reaches it and comes back as CRAWL_INVALID_REQUEST.
   assert.equal(schema.safeParse({ ...base, depth: 0 }).success, true);
   assert.equal(schema.safeParse({ ...base, depth: 1.5 }).success, false);
   assert.equal(schema.safeParse({ ...base, depth: 100_001 }).success, false);
+});
+
+test("crawl_create's description says an omitted depth means no depth limit, and the API defaults", () => {
+  const c = register().configs.crawl_create;
+  const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
+  assert.match(String(shape.depth.description), /Omit for no depth limit/);
+  assert.match(String(shape.max_pages.description), /default 100\)/);
+  assert.match(String(shape.max_items.description), /default 100\)/);
+  assert.match(c.description, /no depth limit when depth is omitted/);
+  assert.doesNotMatch(c.description, /default 10\)/);
+});
+
+test("crawl_create's description says a crawl whose patterns match nothing still bills the start page", () => {
+  const c = register().configs.crawl_create;
+  assert.match(c.description, /match\s+nothing still costs that one scrape/);
 });
 
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
@@ -96,7 +116,7 @@ test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", 
           code: "invalid_parameter",
           title: "Invalid parameter",
           status: 422,
-          detail: "'depth' is required, and at least 1.",
+          detail: "'depth' is between 1 and 100000. Leave it out for no depth limit.",
         },
         422
       ),
@@ -106,6 +126,23 @@ test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", 
   assert.equal(out.isError, true);
   assert.equal(body.code, "CRAWL_INVALID_REQUEST");
   assert.equal(body.server_code, "invalid_parameter");
+  assert.match(body.message, /Leave it out for no depth limit/);
+});
+
+test("crawl_create without depth returns the crawl the API echoes, with no depth", async () => {
+  const { handlers } = register();
+  const { depth: _omitted, ...noDepth } = crawl();
+  const out = await withFetch(
+    () => jsonResponse({ ...noDepth, max_items: 100, max_pages: 100 }, 202),
+    () => handlers.crawl_create({ url: "https://example.com/" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(out.isError, undefined);
+  assert.equal(body.ok, true);
+  assert.equal(body.crawl_id, "c_1");
+  assert.equal("depth" in body.crawl, false);
+  assert.equal(body.crawl.max_pages, 100);
+  assert.equal(body.crawl.max_items, 100);
 });
 
 test("crawl_results on a stopped crawl ends at an empty page even while next_cursor stays set", async () => {
@@ -160,6 +197,8 @@ test("crawl_create sends only the fields the caller set", async () => {
     },
     async () => {
       await handlers.crawl_create({ url: "https://example.com/", depth: 2 });
+      await handlers.crawl_create({ url: "https://example.com/" });
+      await handlers.crawl_create({ url: "https://example.com/", depth: null });
       await handlers.crawl_create({
         url: "https://example.com/",
         depth: 1,
@@ -172,7 +211,9 @@ test("crawl_create sends only the fields the caller set", async () => {
     }
   );
   assert.deepEqual(bodies[0], { url: "https://example.com/", depth: 2 });
-  assert.deepEqual(bodies[1], {
+  assert.deepEqual(bodies[1], { url: "https://example.com/" }, "no depth sent when it is omitted");
+  assert.deepEqual(bodies[2], { url: "https://example.com/" }, "no depth sent when it is null");
+  assert.deepEqual(bodies[3], {
     url: "https://example.com/",
     depth: 1,
     max_items: 3,
@@ -335,6 +376,71 @@ test("crawl_wait takes timeout in seconds and returns the running crawl when it 
   assert.deepEqual(Object.keys(body), ["ok", "crawl_id", "status", "crawl", "note"]);
   assert.equal(body.status, "running");
   assert.match(body.note, /call crawl_wait again/i);
+});
+
+/** crawl_wait through a real MCP client: the crawl runs for two polls, then completes. */
+async function waitOverMcp(t: TestContext, onprogress?: (p: Progress) => void) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const server = new McpServer({ name: "test", version: "0.0.0" });
+  registerCrawlTools(server, "k");
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const sent: JSONRPCMessage[] = [];
+  const send = serverTransport.send.bind(serverTransport);
+  serverTransport.send = (message, options) => {
+    sent.push(message);
+    return send(message, options);
+  };
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await client.connect(clientTransport);
+  let polls = 0;
+  try {
+    await withFetch(
+      () => {
+        polls++;
+        const status = polls <= 2 ? "running" : "completed";
+        const c = crawl(status);
+        return jsonResponse({
+          ...c,
+          coverage: { pages_fetched: polls * 3, pages_failed: 0, items_found: polls * 5 },
+          results: [],
+          next_cursor: status === "running" ? "x" : null,
+        });
+      },
+      async () => {
+        let done = false;
+        const call = client.callTool({ name: "crawl_wait", arguments: { crawl_id: "c_1", timeout: 60 } }, undefined, {
+          onprogress,
+        });
+        call.finally(() => (done = true)).catch(() => undefined);
+        while (!done) {
+          for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+          t.mock.timers.tick(1_000);
+        }
+        const out = (await call) as { content: { text: string }[] };
+        assert.equal(JSON.parse(out.content[0].text).status, "completed");
+      }
+    );
+  } finally {
+    await client.close();
+  }
+  return sent.filter((m) => "method" in m && m.method === "notifications/progress");
+}
+
+test("crawl_wait sends a progress notification after each poll when the call carries a progressToken", async (t) => {
+  const seen: Progress[] = [];
+  const sent = await waitOverMcp(t, (p) => seen.push(p));
+  assert.equal(sent.length, 3, "one notification per poll");
+  assert.deepEqual(
+    seen.map((p) => p.progress),
+    [1, 2, 3]
+  );
+  assert.equal(seen[0].message, "running: 3 pages fetched, 5 URLs kept");
+  assert.equal(seen[2].message, "completed: 9 pages fetched, 15 URLs kept");
+});
+
+test("crawl_wait sends no progress notification without a progressToken", async (t) => {
+  assert.equal((await waitOverMcp(t)).length, 0);
 });
 
 test("crawl_results takes cursor and limit, and caps limit at 10000", async () => {

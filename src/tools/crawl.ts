@@ -120,6 +120,12 @@ function waitedOut(crawl: Crawl, firstUrls?: string[]): { content: TextContent[]
   });
 }
 
+/** One line for a crawl_wait progress notification, e.g. "running: 12 pages fetched, 30 URLs kept". */
+function progressMessage(crawl: Crawl): string {
+  const c = crawl.coverage;
+  return `${crawl.status}: ${c?.pages_fetched ?? 0} pages fetched, ${c?.items_found ?? 0} URLs kept`;
+}
+
 const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
 the URLs behind it, optionally with each page's HTML. For a single page, use scrape.`;
 
@@ -142,13 +148,16 @@ export function registerCrawlTools(server: McpServer, apiKey: string, options: C
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops, keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
+      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops (no depth limit when depth is omitted), keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
 
 ${WHEN_TO_USE}
 
 Each page fetched is billed as one scrape on this account; max_pages bounds the cost
-(default 10), max_items bounds how many URLs are kept (default 10). The start page
-itself is never a result. Set output_format "html" to also store each kept URL's page,
+(default 100), max_items bounds how many URLs are kept (default 100). Without depth, the
+crawl keeps following links until max_pages or max_items stops it or nothing is left to
+open, so set max_pages to what you are willing to spend. The start page itself is never
+a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
+nothing still costs that one scrape. Set output_format "html" to also store each kept URL's page,
 then read it with crawl_content.
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
@@ -164,15 +173,18 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .number()
           .int()
           .max(100_000)
-          .describe("Link hops to follow from the start URL. 1 returns the start page's links; 2 also opens those."),
-        max_items: z.number().int().max(100_000).nullish().describe("Stop once this many URLs are kept (default 10)"),
+          .nullish()
+          .describe(
+            "Link hops to follow from the start URL. 1 returns the start page's links; 2 also opens those. Omit for no depth limit: the crawl follows links until max_pages or max_items stops it."
+          ),
+        max_items: z.number().int().max(100_000).nullish().describe("Stop once this many URLs are kept (default 100)"),
         max_pages: z
           .number()
           .int()
           .max(100_000)
           .nullish()
           .describe(
-            "Stop once this many pages are fetched, each billed as one scrape (default 10). With output_format, every kept URL's page counts too."
+            "Stop once this many pages are fetched, each billed as one scrape (default 100). With output_format, every kept URL's page counts too."
           ),
         include_patterns: z
           .array(z.string().min(1))
@@ -196,7 +208,8 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       },
     },
     async (params) => {
-      const body: CreateCrawlBody = { url: params.url, depth: params.depth };
+      const body: CreateCrawlBody = { url: params.url };
+      if (params.depth != null) body.depth = params.depth;
       if (params.max_items != null) body.max_items = params.max_items;
       if (params.max_pages != null) body.max_pages = params.max_pages;
       if (params.include_patterns?.length) body.include_patterns = params.include_patterns;
@@ -363,7 +376,7 @@ markdown version of a page, use scrape on its URL instead.`,
       },
       description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
-Idempotent: a crawl that already ended answers with its final status. A 503 crawl_busy (the stop was not saved yet) is retried up to 3 times, waiting at most 50 seconds in all; if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
+Idempotent: a crawl that already ended answers with its final status. A 429, 502, 503 or 504 is retried up to 3 times, waiting at most 50 seconds in all; a 503 crawl_busy means the stop was not saved yet, and if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
       inputSchema: { crawl_id: crawlIdSchema },
     },
     async ({ crawl_id }) => {
@@ -379,7 +392,7 @@ Idempotent: a crawl that already ended answers with its final status. A 503 craw
     "crawl_wait",
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again.`,
+      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z
@@ -393,9 +406,22 @@ Idempotent: a crawl that already ended answers with its final status. A 503 craw
           ),
       },
     },
-    async ({ crawl_id, timeout }) => {
+    async ({ crawl_id, timeout }, extra) => {
+      // Progress goes only to a client that asked for it with a progressToken.
+      const progressToken = extra?._meta?.progressToken;
+      const onPoll =
+        progressToken === undefined
+          ? undefined
+          : (crawl: Crawl, poll: number) =>
+              extra
+                .sendNotification({
+                  method: "notifications/progress",
+                  params: { progressToken, progress: poll, message: progressMessage(crawl) },
+                })
+                // A lost progress notification must not end the wait.
+                .catch(() => undefined);
       try {
-        const crawl = await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined });
+        const crawl = await waitForCrawl(crawl_id, { ...call, timeout: timeout ?? undefined, onPoll });
         if (!isTerminal(crawl.status) || !crawl.coverage?.items_found) return waitedOut(crawl);
         // The first URLs are a preview; a failed read of them must not hide that the crawl ended.
         const first = await getCrawl(crawl_id, { ...call, limit: WAIT_URLS }).catch(() => undefined);

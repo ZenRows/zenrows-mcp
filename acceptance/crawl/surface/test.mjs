@@ -183,7 +183,8 @@ await check(
 // ---------- check 1, offline half: what the server sends ----------
 const cap = await H.captureServer();
 const capSrv = await startServer("capture-key", { ZENROWS_CRAWL_API_BASE: cap.base });
-await call(capSrv.client, "crawl_create", { url: "https://example.com/", depth: 1 });
+// depth is optional: left out, it is not sent, and the crawl has no depth limit.
+await call(capSrv.client, "crawl_create", { url: "https://example.com/" });
 await call(capSrv.client, "crawl_create", {
   url: "https://example.com/",
   depth: 1,
@@ -194,7 +195,7 @@ await call(capSrv.client, "crawl_create", {
 });
 const sent = { minimal: cap.requests[0]?.body, full: cap.requests[1]?.body };
 const sentOk =
-  H.sameKeys(sent.minimal, ["url", "depth"]) &&
+  H.sameKeys(sent.minimal, ["url"]) &&
   H.sameKeys(sent.full, ["url", "depth", "max_items", "max_pages", "include_patterns"]);
 const sentLine = `sent (stand-in server): minimal=${JSON.stringify(sent.minimal)} full=${JSON.stringify(sent.full)}`;
 await capSrv.close();

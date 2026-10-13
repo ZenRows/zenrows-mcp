@@ -2,8 +2,8 @@
  * Client for the Zenrows Crawl API (https://api.zenrows.com/v1/crawls).
  * Auth via X-API-Key header. Errors are application/problem+json (RFC 9457).
  *
- * A crawl follows the links on each page up to `depth` and stays on the start URL's
- * registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
+ * A crawl follows the links on each page up to `depth` hops, or with no depth limit when the
+ * create leaves `depth` out, and stays on the start URL's registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
  * is stored) or absent (URLs only).
  */
 
@@ -27,7 +27,8 @@ export interface Crawl {
   crawl_id: string;
   status: string;
   url: string;
-  depth: number;
+  /** Absent when the create left depth out: the crawl has no depth limit. */
+  depth?: number;
   max_items: number;
   max_pages: number;
   coverage: CrawlCoverage;
@@ -70,7 +71,8 @@ export interface CrawlStop {
 /** Create body. Unset fields are not sent. */
 export interface CreateCrawlBody {
   url: string;
-  depth: number;
+  /** Left out: no depth limit; max_pages or max_items ends the crawl. */
+  depth?: number;
   max_items?: number;
   max_pages?: number;
   include_patterns?: string[];
@@ -144,8 +146,8 @@ interface RequestOpts {
   timeoutMs?: number;
   userAgent?: string;
   fetchImpl?: typeof fetch;
-  /** Retry a 503 crawl_busy (stop only): the stop was not saved and the crawl still runs. */
-  retryBusy?: boolean;
+  /** Stop only: retry a 429, 502, 503 or 504. Repeating a stop is safe; a stop on an ended crawl answers 200. */
+  retryStop?: boolean;
 }
 
 const RETRIES = 3;
@@ -154,6 +156,7 @@ export const MAX_RETRY_AFTER_SECONDS = 30;
 const GET_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 // 429 too_many_crawls is a capacity limit: a retry only waits for a slot the caller may never get.
 const CREATE_RETRY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+const STOP_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 
 /** 250 ms x 2^attempt, +/-20% jitter, capped at 10 s. */
 function backoffMs(attempt: number): number {
@@ -175,18 +178,10 @@ function retryAfterMs(retryAfter: number | undefined, fallbackMs: number): numbe
   return retryAfter !== undefined ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1000 : fallbackMs;
 }
 
-function problemCode(body: string): string | undefined {
-  try {
-    return (JSON.parse(body) as ProblemJson).code;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
- * GETs retry; a POST retries only with an idempotency key (create). Stop retries only a 503
- * crawl_busy, which means nothing was saved, and waits on it DEFAULT_WAIT_SECONDS at most in
- * all. Network errors, the request timeout included, retry under the GET and create rule.
+ * GETs retry; a POST retries only with an idempotency key (create). Stop retries a 429, 502,
+ * 503 (crawl_busy included: the stop was not saved) or 504, and waits DEFAULT_WAIT_SECONDS at
+ * most in all. Network errors, the request timeout included, retry under the GET and create rule.
  * The timeout covers reading the body; `raw` leaves a success body unread for the caller to stream.
  */
 async function crawlFetch(
@@ -209,7 +204,7 @@ async function crawlFetch(
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
   const retryStatuses = method === "GET" ? GET_RETRY_STATUSES : opts.idempotencyKey ? CREATE_RETRY_STATUSES : undefined;
   const doFetch = opts.fetchImpl ?? fetch;
-  let busyWaitMs = 0;
+  let stopWaitMs = 0;
 
   for (let attempt = 0; ; attempt++) {
     const canRetry = retryStatuses !== undefined && attempt < RETRIES;
@@ -243,11 +238,11 @@ async function crawlFetch(
       await sleep(retryAfterMs(retryAfter, backoffMs(attempt)));
       continue;
     }
-    if (opts.retryBusy && attempt < RETRIES && res.status === 503 && problemCode(body) === "crawl_busy") {
+    if (opts.retryStop && attempt < RETRIES && STOP_RETRY_STATUSES.has(res.status)) {
       const wait = retryAfterMs(retryAfter, 1000);
       // Many MCP clients cancel a tool call after 60 s.
-      if (busyWaitMs + wait <= DEFAULT_WAIT_SECONDS * 1000) {
-        busyWaitMs += wait;
+      if (stopWaitMs + wait <= DEFAULT_WAIT_SECONDS * 1000) {
+        stopWaitMs += wait;
         await sleep(wait);
         continue;
       }
@@ -379,7 +374,7 @@ export function listCrawls(opts: CallOpts & { cursor?: string; limit?: number })
 }
 
 export function stopCrawl(id: string, opts: CallOpts): Promise<CrawlStop> {
-  return crawlRequest<CrawlStop>("POST", `${crawlPath(id)}/stop`, { ...opts, retryBusy: true });
+  return crawlRequest<CrawlStop>("POST", `${crawlPath(id)}/stop`, { ...opts, retryStop: true });
 }
 
 /** One kept URL's page, as the crawl stored it (HTML text for output_format html). */
@@ -455,15 +450,21 @@ export async function readResults(
 /**
  * Polls the crawl (limit=1, so each poll is cheap) until its status is terminal or
  * `timeout` seconds run out. Running out is not an error: it returns the crawl, still running.
+ * `onPoll` runs after each poll with the crawl and the poll's number, counted from 1.
  */
 export async function waitForCrawl(
   id: string,
-  opts: CallOpts & { timeout?: number; pollDelayMs?: number }
+  opts: CallOpts & {
+    timeout?: number;
+    pollDelayMs?: number;
+    onPoll?: (crawl: Crawl, poll: number) => void | Promise<void>;
+  }
 ): Promise<Crawl> {
   const deadline = Date.now() + (opts.timeout ?? DEFAULT_WAIT_SECONDS) * 1000;
   let delay = opts.pollDelayMs ?? 2000;
-  for (;;) {
+  for (let poll = 1; ; poll++) {
     const crawl = await getCrawl(id, { ...opts, limit: 1 });
+    await opts.onPoll?.(withoutResults(crawl), poll);
     if (isTerminal(crawl.status) || Date.now() + delay > deadline) return withoutResults(crawl);
     await new Promise<void>((r) => setTimeout(r, delay));
     delay = Math.min(delay * 1.5, 15_000);
