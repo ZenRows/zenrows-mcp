@@ -369,7 +369,7 @@ markdown version of a page, use scrape on its URL instead.`,
       },
       description: `Stop a running crawl. No page still waiting is fetched or billed; pages already in flight finish. The URLs kept so far stay readable with crawl_results. A stopped crawl cannot resume.
 
-Idempotent: a crawl that already ended answers with its final status. A 503 crawl_busy (the stop was not saved yet) is retried up to 3 times, waiting at most 50 seconds in all; if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
+Idempotent: a crawl that already ended answers with its final status. A 429, 502, 503 or 504 is retried up to 3 times, waiting at most 50 seconds in all; a 503 crawl_busy means the stop was not saved yet, and if it persists, CRAWL_BUSY says when to call again. Pages in flight still finish, so coverage and results can keep growing for up to 10 minutes after the stop; read them with crawl_get and crawl_results.`,
       inputSchema: { crawl_id: crawlIdSchema },
     },
     async ({ crawl_id }) => {
