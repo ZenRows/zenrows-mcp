@@ -94,26 +94,22 @@ export function registerAccountTools(server: McpServer, apiKey: string, opts: Ac
       },
       description: `Read the current plan's credit allowance and how much of it is spent.
 
-Call this BEFORE a large batch, and after any 402 / AUTH004, to find out whether the
-account is out of credits and when the allowance renews. It is free and does not consume
-a concurrency slot, so it is safe to poll between runs.
+Useful before a large batch, or after a 402 / AUTH004, to see whether the account has
+credits left and when the allowance renews. The call is free and does not use a
+concurrency slot.
 
-Credit costs per request: 1 basic, 5 js_render, 10 premium_proxy, 25 both. On a small
-plan a few hundred protected requests can exhaust a month, so check before fanning out.
+Credit costs per request: 1 basic, 5 js_render, 10 premium_proxy, 25 both.
 
-AUTH004 ("usage exceeded") means this allowance is spent. It renews at the end of the
-billing period, so it is not a permanent block: never retry-loop against it. If the
-human does not want to wait for the renewal, relay the way to continue now: add a
-credit pack at https://app.zenrows.com/billing?topup=open (opens the purchase
-directly) or upgrade at https://app.zenrows.com/plans. Prices are per plan; quote them
-only from this tool's response, never from memory.
-AUTH006 is the concurrency limit, which is a different thing entirely.
+AUTH004 ("usage exceeded") means this allowance is spent until it renews at the end of
+the billing period. More credits: a credit pack at https://app.zenrows.com/billing?topup=open or a
+plan change at https://app.zenrows.com/plans; this tool's response has the plan's prices.
+AUTH006 is the concurrency limit, not a credit limit.
 
-AUTH014 (Batch: api_key_cap_reached) is different from AUTH004: the account still has
-credits, but this API key hit one of its own credit caps. Other keys keep working. The
-response's api_key.caps lists the calling key's caps: window, credits, used_credits,
-remaining_credits, resets_at, and unavailable (usage could not be read). Relay the
-resets_at time, or raise or remove the cap at https://app.zenrows.com/settings/api-keys.`,
+AUTH014 (Batch: api_key_cap_reached) means this API key hit one of its own credit caps
+while the account still has credits; other keys keep working. The response's
+api_key.caps lists the calling key's caps: window, credits, used_credits,
+remaining_credits, resets_at, and unavailable (usage could not be read). Caps are
+managed at https://app.zenrows.com/settings/api-keys.`,
       inputSchema: {},
     },
     async () => runAccountUsage(apiKey, opts)
