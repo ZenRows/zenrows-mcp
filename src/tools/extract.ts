@@ -264,7 +264,7 @@ export function registerExtractTool(server: McpServer, apiKey: string, getClient
 
 Returns JSON fields (products, articles, listings) rather than a full page body.
 Modes:
-- auto (default): extract=auto — site-tailored Extract (beta; currently free,
+- auto (default): extract=auto, site-tailored Extract (beta; currently free,
   billing may apply later). Works on any domain Zenrows has prepared, with any
   API key; falls back to autoparse when the domain isn't prepared yet (REQS007)
 - autoparse: general-purpose structured JSON on any domain
