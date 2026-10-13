@@ -98,6 +98,11 @@ test("crawl_create's description says an omitted depth means no depth limit, and
   assert.doesNotMatch(c.description, /default 10\)/);
 });
 
+test("crawl_create's description says a crawl whose patterns match nothing still bills the start page", () => {
+  const c = register().configs.crawl_create;
+  assert.match(c.description, /match\s+nothing still costs that one scrape/);
+});
+
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
   const { handlers } = register();
   const out = await withFetch(

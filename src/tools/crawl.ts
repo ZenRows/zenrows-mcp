@@ -150,7 +150,8 @@ Each page fetched is billed as one scrape on this account; max_pages bounds the 
 (default 100), max_items bounds how many URLs are kept (default 100). Without depth, the
 crawl keeps following links until max_pages or max_items stops it or nothing is left to
 open, so set max_pages to what you are willing to spend. The start page itself is never
-a result. Set output_format "html" to also store each kept URL's page,
+a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
+nothing still costs that one scrape. Set output_format "html" to also store each kept URL's page,
 then read it with crawl_content.
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
