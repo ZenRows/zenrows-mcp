@@ -6,6 +6,7 @@ import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
+import { registerCrawlTools } from "./tools/crawl.js";
 import { registerExtractTool } from "./tools/extract.js";
 
 const require = createRequire(import.meta.url);
@@ -74,7 +75,12 @@ export function buildScrapeParams(apiKey: string, params: ScrapeParams): URLSear
   return searchParams;
 }
 
-export function createServer(apiKey: string, clientName?: string): McpServer {
+export interface ServerOptions {
+  /** Served over HTTP (hosted): tools that would write to this machine's disk answer differently. */
+  hosted?: boolean;
+}
+
+export function createServer(apiKey: string, clientName?: string, options: ServerOptions = {}): McpServer {
   const server = new McpServer({
     name: "zenrows",
     version: pkg.version,
@@ -365,6 +371,7 @@ Examples:
 
   registerExtractTool(server, apiKey, getClientName);
   registerBatchTools(server, apiKey);
+  registerCrawlTools(server, apiKey, { hosted: options.hosted });
   registerAccountTools(server, apiKey);
 
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
