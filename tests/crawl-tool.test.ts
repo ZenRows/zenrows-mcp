@@ -145,20 +145,47 @@ test("crawl_create without depth returns the crawl the API echoes, with no depth
   assert.equal(body.crawl.max_items, 100);
 });
 
-test("crawl_results on a stopped crawl ends at an empty page even while next_cursor stays set", async () => {
+test("crawl_results on a stopped crawl keeps the API's cursor while pages fetched before the stop are read", async () => {
   const { handlers } = register();
   const rows = [{ url: "https://example.com/p/1", content_status: "pending" }];
   let calls = 0;
   const out = await withFetch(
     () => {
       calls++;
-      // Pages in flight after the stop: the API keeps a cursor but has no new rows.
+      // Pages in flight at the stop: the API keeps a cursor but has no new rows yet.
       return jsonResponse({ ...crawl("stopped"), results: calls === 1 ? rows : [], next_cursor: "still-set" });
     },
     () => handlers.crawl_results({ crawl_id: "c_1" })
   );
   const body = JSON.parse(out.content[0].text);
+  assert.equal(calls, 2, "an empty page ends the read");
   assert.equal(body.count, 1);
+  assert.equal(body.partial, true);
+  assert.equal(body.next_cursor, "still-set");
+  assert.match(body.note, /stopped/);
+  assert.match(body.note, /10 minutes/);
+});
+
+test("crawl_results right after a stop, with no URLs yet, still returns the cursor", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ ...crawl("stopped"), results: [], next_cursor: "still-set" }),
+    () => handlers.crawl_results({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.count, 0);
+  assert.equal(body.partial, true);
+  assert.equal(body.next_cursor, "still-set");
+  assert.match(body.note, /stopped/);
+});
+
+test("crawl_results on a stopped crawl whose cursor is null is not partial", async () => {
+  const { handlers } = register();
+  const out = await withFetch(
+    () => jsonResponse({ ...crawl("stopped"), results: [{ url: "https://example.com/p/1" }], next_cursor: null }),
+    () => handlers.crawl_results({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
   assert.equal(body.partial, false);
   assert.equal(body.next_cursor, null);
   assert.equal("note" in body, false);
@@ -178,6 +205,7 @@ test("crawl_results on an ended crawl still says partial when the call filled it
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.partial, true);
   assert.equal(body.next_cursor, "more");
+  assert.equal(body.note, "More results remain: call crawl_results again with next_cursor.");
 });
 
 test("crawl_create's schema takes only its own inputs and drops unknown ones", () => {
