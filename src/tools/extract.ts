@@ -47,7 +47,7 @@ export function isEmptyData(data: unknown): boolean {
 /** Errors on extract=auto that the autoparse fallback can recover from. */
 function isExtractUnavailable(status: number, body: string): boolean {
   const code = zrErrorCode(body);
-  // AUTH010: domain not in the Extract open beta. REQS007: domain not prepared yet.
+  // REQS007: domain not prepared for Extract yet. AUTH010: legacy domain-not-enabled code.
   return (status === 402 && code === "AUTH010") || (status === 403 && code === "REQS007");
 }
 
@@ -264,9 +264,9 @@ export function registerExtractTool(server: McpServer, apiKey: string, getClient
 
 Returns JSON fields (products, articles, listings) rather than a full page body.
 Modes:
-- auto (default): extract=auto — site-tailored Extract (open beta; currently free,
-  billing may apply later; falls back to autoparse when the domain isn't enabled
-  or prepared for Extract yet)
+- auto (default): extract=auto — site-tailored Extract (beta; currently free,
+  billing may apply later). Works on any domain Zenrows has prepared, with any
+  API key; falls back to autoparse when the domain isn't prepared yet (REQS007)
 - autoparse: general-purpose structured JSON on any domain
 - css: css_extractor with an explicit selector map
 
@@ -334,7 +334,7 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .nullish()
           .default(true)
           .describe(
-            "When mode=auto and the domain isn't enabled (AUTH010) or prepared (REQS007) for Extract, retry once with autoparse (default true)"
+            "When mode=auto and the domain isn't prepared for Extract yet (REQS007, or the legacy AUTH010), retry once with autoparse (default true)"
           ),
       },
     },
