@@ -3,7 +3,7 @@
  * Auth via X-API-Key header. Errors are application/problem+json (RFC 9457).
  *
  * A crawl follows the links on each page up to `depth` hops, or with no depth limit when the
- * create leaves `depth` out, and stays on the start URL's registrable domain (subdomains count). `output_format` is `html` (each kept URL's page
+ * create leaves `depth` out, and stays on the start URL's registrable domain (subdomains count). `output_format` is `html` or `markdown` (each kept URL's page
  * is stored) or absent (URLs only).
  */
 
@@ -77,7 +77,7 @@ export interface CreateCrawlBody {
   max_pages?: number;
   include_patterns?: string[];
   exclude_patterns?: string[];
-  output_format?: "html";
+  output_format?: "html" | "markdown";
 }
 
 export interface ProblemJson {
@@ -386,7 +386,7 @@ export function stopCrawl(id: string, opts: CallOpts): Promise<CrawlStop> {
   return crawlRequest<CrawlStop>("POST", `${crawlPath(id)}/stop`, { ...opts, retryStop: true });
 }
 
-/** One kept URL's page, as the crawl stored it (HTML text for output_format html). */
+/** One kept URL's page, as the crawl stored it (HTML or Markdown text, per output_format). */
 export async function getCrawlContent(
   id: string,
   contentId: string,

@@ -166,7 +166,7 @@ Each page fetched is billed as one scrape on this account; max_pages bounds the 
 crawl keeps following links until max_pages or max_items stops it or nothing is left to
 open, so set max_pages to what you are willing to spend. The start page itself is never
 a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
-nothing still costs that one scrape. Set output_format "html" to also store each kept URL's page,
+nothing still costs that one scrape. Set output_format "html" or "markdown" to also store each kept URL's page,
 then read it with crawl_content.
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
@@ -204,9 +204,11 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .nullish()
           .describe("Drop URLs containing any of these substrings, even if they match include_patterns"),
         output_format: z
-          .enum(["html"])
+          .enum(["html", "markdown"])
           .nullish()
-          .describe("'html' also stores each kept URL's page for crawl_content. Omit for URLs only."),
+          .describe(
+            "'html' or 'markdown' also stores each kept URL's page for crawl_content, as fetched or converted to Markdown. Omit for URLs only."
+          ),
         idempotency_key: z
           .string()
           .min(1)
@@ -303,11 +305,12 @@ While the crawl runs the list is partial (partial=true): call again later with t
     "crawl_content",
     {
       annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
+      description: `Read the stored page of one URL a crawl kept, in the crawl's output_format. Works only for crawls created with an output_format, and only for results whose content_status is fetched.
 
-Pass crawl_id and content_id: a content id, or content_url from a crawl_results row. Returns raw HTML,
-cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
-markdown version of a page, use scrape on its URL instead.`,
+Pass crawl_id and content_id: a content id, or content_url from a crawl_results row. Returns the page
+as stored — raw HTML for output_format "html", Markdown for "markdown" — cut to max_chars (default
+${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. To read a page the crawl did not
+store, use scrape on its URL instead.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         content_id: z
@@ -320,7 +323,7 @@ markdown version of a page, use scrape on its URL instead.`,
           .min(1000)
           .max(10_000_000)
           .nullish()
-          .describe(`Max characters of HTML to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
+          .describe(`Max characters of the page to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
       },
     },
     async ({ crawl_id, content_id, max_chars }) => {

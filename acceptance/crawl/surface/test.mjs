@@ -671,6 +671,23 @@ await liveCheck("14", "Gated option", "output_format json is refused: by the inp
       : H.trim(show(r), 300),
   };
 });
+await liveCheck(
+  "22",
+  "Markdown output",
+  'crawl_create with output_format "markdown" is accepted and echoed back',
+  async () => {
+    const r = await call(S, "crawl_create", { ...base, max_items: 1, max_pages: 1, output_format: "markdown" });
+    if (r.isError || !r.data?.crawl_id) {
+      return { status: FAIL, actual: H.trim(show(r), 400) };
+    }
+    ledger(r.data.crawl_id, "output_format markdown");
+    await call(S, "crawl_stop", { crawl_id: r.data.crawl_id });
+    return {
+      status: passIf(r.data.output_format === "markdown"),
+      actual: `${r.data.crawl_id}: output_format ${r.data.output_format}`,
+    };
+  },
+);
 await check("15", "Bad key", "AUTH_INVALID", async () => {
   const bad = await startServer("invalid");
   const r = await call(bad.client, "crawl_get", { crawl_id: "c_does_not_exist" });
