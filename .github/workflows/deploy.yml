@@ -127,7 +127,7 @@ jobs:
     permissions:
       contents: read
     env:
-      VERSION: ${{ needs.tag.outputs.version }}
+      RELEASE_VERSION: ${{ needs.tag.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,7 +149,7 @@ jobs:
           mkdir dist-npm
           npm pack --pack-destination dist-npm
           # The packed version must be the tag version.
-          test -f "dist-npm/zenrows-mcp-$VERSION.tgz"
+          test -f "dist-npm/zenrows-mcp-$RELEASE_VERSION.tgz"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -166,7 +166,7 @@ jobs:
       contents: read
       id-token: write # OIDC for npm Trusted Publishing
     env:
-      VERSION: ${{ needs.tag.outputs.version }}
+      RELEASE_VERSION: ${{ needs.tag.outputs.version }}
 
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -184,9 +184,9 @@ jobs:
       - name: Check npm
         id: npm
         run: |
-          status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@zenrows%2fmcp/$VERSION")
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@zenrows%2fmcp/$RELEASE_VERSION")
           if [ "$status" = 200 ]; then
-            echo "::notice::@zenrows/mcp $VERSION is already on npm. Publishing is skipped."
+            echo "::notice::@zenrows/mcp $RELEASE_VERSION is already on npm. Publishing is skipped."
             echo "published=true" >>"$GITHUB_OUTPUT"
           fi
 
@@ -195,7 +195,7 @@ jobs:
       # Provenance is automatic with trusted publishing.
       - name: Publish to npm
         if: steps.npm.outputs.published != 'true'
-        run: npm publish "dist-npm/zenrows-mcp-$VERSION.tgz" --access public --ignore-scripts
+        run: npm publish "dist-npm/zenrows-mcp-$RELEASE_VERSION.tgz" --access public --ignore-scripts
 
   # Official MCP Registry (registry.modelcontextprotocol.io). After npm: the
   # package must exist for the ownership checks.

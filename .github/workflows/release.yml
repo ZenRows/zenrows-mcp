@@ -135,7 +135,7 @@ jobs:
     permissions:
       contents: read
     env:
-      VERSION: ${{ needs.detect.outputs.version }}
+      RELEASE_VERSION: ${{ needs.detect.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -162,7 +162,7 @@ jobs:
           # The built version must be the release version, in package.json and server.json.
           npm run check:server-json
           npm pack
-          test -f "zenrows-mcp-$VERSION.tgz"
+          test -f "zenrows-mcp-$RELEASE_VERSION.tgz"
 
   release:
     name: Tag, release and publish
@@ -177,7 +177,7 @@ jobs:
       contents: write
       pull-requests: write
     env:
-      VERSION: ${{ needs.detect.outputs.version }}
+      RELEASE_VERSION: ${{ needs.detect.outputs.version }}
       TAG: ${{ needs.detect.outputs.tag }}
       PREVIOUS_TAG: ${{ needs.detect.outputs.previous_tag }}
       COMMIT: ${{ needs.detect.outputs.sha }}
@@ -233,7 +233,7 @@ jobs:
         run: |
           repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
           {
-            echo "## @zenrows/mcp $VERSION"
+            echo "## @zenrows/mcp $RELEASE_VERSION"
             echo "- Tag: [$TAG]($repo/tree/$TAG)"
             echo "- Release: [$TAG]($repo/releases/tag/$TAG)"
             echo "- Publish: [npm, MCP Registry, GHCR and deploy]($repo/actions/workflows/deploy.yml)"
