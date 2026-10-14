@@ -75,6 +75,15 @@ function crawlErr(e: unknown, crawlId?: string): { content: TextContent[]; isErr
 const WAIT_NOTE =
   "The wait ran out and the crawl is still running. Call crawl_wait again, read partial results with crawl_results, or stop it with crawl_stop.";
 
+/** What a crawl_results reply that still has a cursor tells the agent to do next. */
+function resultsNote(status: string, ended: boolean, full: boolean): string {
+  if (!ended) {
+    return "The crawl is still running, so this list is partial: call crawl_results again with next_cursor later, or crawl_wait first.";
+  }
+  if (full || status !== "stopped") return "More results remain: call crawl_results again with next_cursor.";
+  return "The crawl was stopped, but pages fetched before the stop can still add URLs for up to 10 minutes: call crawl_results again later with next_cursor. Once next_cursor is null, every URL was read.";
+}
+
 /**
  * The one output shape of crawl_create, crawl_get, crawl_wait and crawl_stop. A crawl that
  * ended `failed` answers ok: false with an error naming its code, as the CLI does, so an agent
@@ -259,7 +268,7 @@ completed with stop_reason max_items / max_pages means a limit ended it; failed 
 
 Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url: pass it to crawl_content as content.
 
-While the crawl runs the list is partial (partial=true): call again later with the returned next_cursor to get only the URLs kept since. next_cursor is null once the crawl ended and every URL was read.`,
+While the crawl runs the list is partial (partial=true): call again later with the returned next_cursor to get only the URLs kept since. A stopped crawl can still add URLs from pages fetched before the stop for up to 10 minutes, so next_cursor stays set during that window: call again later. next_cursor is null once the crawl ended and every URL was read.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_results call, to continue from there"),
@@ -269,25 +278,19 @@ While the crawl runs the list is partial (partial=true): call again later with t
     async ({ crawl_id, cursor, limit }) => {
       try {
         const read = await readResults(crawl_id, { ...call, cursor: cursor ?? undefined, limit: limit ?? undefined });
-        // An ended crawl keeps no new URLs, but pages still in flight after a stop keep next_cursor
-        // set for a while. So on an ended crawl only a full page means more remain; an empty or
-        // short one means every URL was read, and telling the agent to call again would loop it.
+        // Trust the API's cursor: a stopped crawl keeps the links found on pages still in flight at
+        // the stop for up to 10 minutes, and the API keeps next_cursor set until they are read.
         const ended = isTerminal(read.status);
-        const partial = !ended || (read.next_cursor !== null && read.results.length >= (limit ?? DEFAULT_LIMIT));
+        const partial = read.next_cursor !== null;
+        const full = read.results.length >= (limit ?? DEFAULT_LIMIT);
         return json({
           ok: true,
           crawl_id,
           status: read.status,
           count: read.results.length,
           partial,
-          next_cursor: partial ? read.next_cursor : null,
-          ...(partial
-            ? {
-                note: ended
-                  ? "More results remain: call crawl_results again with next_cursor."
-                  : "The crawl is still running, so this list is partial: call crawl_results again with next_cursor later, or crawl_wait first.",
-              }
-            : {}),
+          next_cursor: read.next_cursor,
+          ...(partial ? { note: resultsNote(read.status, ended, full) } : {}),
           results: read.results,
         });
       } catch (e) {

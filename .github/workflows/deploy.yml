@@ -148,6 +148,24 @@ jobs:
           npm run check:server-json
           cat server.json
 
+      # The registry rejects a version npm does not serve yet, and a fresh
+      # publish can take a minute or more to appear.
+      - name: Wait until npm serves this version
+        run: |
+          PKG=$(jq -r '.packages[0].identifier' server.json)
+          VERSION=$(jq -r '.packages[0].version' server.json)
+          URL="https://registry.npmjs.org/${PKG/\//%2f}/${VERSION}"
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null "$URL"; then
+              echo "npm serves ${PKG}@${VERSION}"
+              exit 0
+            fi
+            echo "npm does not serve ${PKG}@${VERSION} yet ($i/30)"
+            sleep 10
+          done
+          echo "::error::npm still does not serve ${PKG}@${VERSION} after 5 minutes"
+          exit 1
+
       - name: Install mcp-publisher
         run: |
           curl -fsSL \
