@@ -22,7 +22,6 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "prepare": "npm run build",
     "prepublishOnly": "npm run clean && npm run build && npm run typecheck && npm run lint && npm test && npm run check:server-json",
-    "publish-beta": "npm publish --tag beta",
     "sync:server-json": "node scripts/sync-server-json-version.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:e2e": "node --import tsx --test tests/e2e/*.test.ts",

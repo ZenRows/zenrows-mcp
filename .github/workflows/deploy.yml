@@ -1,35 +1,72 @@
+# npm trusted publishing is bound to this file name. Do not rename it.
+# The Release workflow starts this workflow after it creates the tag.
 name: Publish
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-  # Catch-up / metadata-only republish without cutting a new npm version.
   workflow_dispatch:
     inputs:
-      publish_npm:
-        description: "Also publish to npm (default: registry only)"
-        type: boolean
-        default: false
-      publish_ghcr:
-        description: "Also build/push GHCR + deploy (default: registry only)"
-        type: boolean
-        default: false
+      tag:
+        description: Existing release tag to publish, for example v2.6.1
+        required: true
+        type: string
+
+permissions: {}
 
 jobs:
+  tag:
+    name: Check the tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The tag must look like v1.2.3."; exit 1
+          fi
+          git rev-parse -q --verify "refs/tags/$INPUT_TAG" >/dev/null || {
+            echo "::error::The tag $INPUT_TAG does not exist."; exit 1; }
+          # Only a tag the Release workflow released: its commit is on main and it
+          # has a GitHub release. A hand-made tag on an unreviewed commit is refused.
+          [ "$GITHUB_REF" = refs/heads/main ] || {
+            echo "::error::Run the Publish workflow from main."; exit 1; }
+          git merge-base --is-ancestor "refs/tags/$INPUT_TAG" HEAD || {
+            echo "::error::The tag $INPUT_TAG is not on main."; exit 1; }
+          gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || {
+            echo "::error::The tag $INPUT_TAG has no GitHub release."; exit 1; }
+          {
+            echo "tag=$INPUT_TAG"
+            echo "version=${INPUT_TAG#v}"
+          } >>"$GITHUB_OUTPUT"
+
   # Hosted MCP (Lambda) only needs GHCR. Don't block it on npm registry auth.
   publish-ghcr:
     name: GHCR + deploy
-    if: github.event_name == 'push' || inputs.publish_ghcr
+    needs: tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.tag.outputs.tag }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
           cache: "npm"
@@ -40,7 +77,7 @@ jobs:
       - run: npm run build
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -48,26 +85,23 @@ jobs:
 
       - name: Resolve image tag
         id: meta
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-          fi
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+        run: echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build and push to GHCR
         run: |
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           docker build --platform linux/arm64 \
-            -t ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }} \
-            -t ghcr.io/${OWNER}/zenrows-mcp:latest \
+            -t "ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }}" \
+            -t "ghcr.io/${OWNER}/zenrows-mcp:latest" \
             .
-          docker push ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }}
-          docker push ghcr.io/${OWNER}/zenrows-mcp:latest
+          docker push "ghcr.io/${OWNER}/zenrows-mcp:${{ steps.meta.outputs.tag }}"
+          docker push "ghcr.io/${OWNER}/zenrows-mcp:latest"
 
       - name: Create deploy token
         id: app-token
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.DEPLOY_APP_ID }}
           private-key: ${{ secrets.DEPLOY_APP_PRIVATE_KEY }}
@@ -84,55 +118,102 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
-  publish-npm:
-    name: npm
-    if: github.event_name == 'push' || inputs.publish_npm
+  # The checks and the package build run with read-only rights. The job that
+  # can mint an npm token runs no project code.
+  pack:
+    name: Check and pack
+    needs: tag
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # OIDC for npm Trusted Publishing
-
+    env:
+      VERSION: ${{ needs.tag.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Trusted Publishing needs npm >= 11.5.1 (ships with Node 24).
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+          ref: refs/tags/${{ needs.tag.outputs.tag }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
           cache: "npm"
 
       - run: npm ci
       - run: npm run check:server-json
       - run: npm test
-      - run: npm run build
+
+      - name: Pack
+        run: |
+          set -euo pipefail
+          mkdir dist-npm
+          npm pack --pack-destination dist-npm
+          # The packed version must be the tag version.
+          test -f "dist-npm/zenrows-mcp-$VERSION.tgz"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: npm
+          path: dist-npm/
+          if-no-files-found: error
+
+  publish-npm:
+    name: npm
+    needs: [tag, pack]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # OIDC for npm Trusted Publishing
+    env:
+      VERSION: ${{ needs.tag.outputs.version }}
+
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: npm
+          path: dist-npm/
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          # Trusted Publishing needs npm >= 11.5.1 (ships with Node 24).
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # A re-run after a partial publish skips npm and goes on to the registry.
+      - name: Check npm
+        id: npm
+        run: |
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/@zenrows%2fmcp/$VERSION")
+          if [ "$status" = 200 ]; then
+            echo "::notice::@zenrows/mcp $VERSION is already on npm. Publishing is skipped."
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          fi
 
       # No NODE_AUTH_TOKEN — npm uses GitHub OIDC against the Trusted Publisher
       # configured on https://www.npmjs.com/package/@zenrows/mcp (Settings).
       # Provenance is automatic with trusted publishing.
-      - run: npm publish --access public
+      - name: Publish to npm
+        if: steps.npm.outputs.published != 'true'
+        run: npm publish "dist-npm/zenrows-mcp-$VERSION.tgz" --access public --ignore-scripts
 
-  # Official MCP Registry (registry.modelcontextprotocol.io). Independent of npm
-  # publish so metadata can be fixed without cutting a new package version.
+  # Official MCP Registry (registry.modelcontextprotocol.io). After npm: the
+  # package must exist for the ownership checks.
   publish-mcp-registry:
     name: MCP Registry
-    # After npm on tag pushes (package must exist for ownership checks). On
-    # workflow_dispatch, npm is optional — assumed already published.
-    needs: [publish-npm]
-    if: |
-      always() && !cancelled() && (
-        (github.event_name == 'push' && needs.publish-npm.result == 'success') ||
-        (github.event_name == 'workflow_dispatch' && (inputs.publish_npm == false || needs.publish-npm.result == 'success'))
-      )
+    needs: [tag, publish-npm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write # OIDC for mcp-publisher login github-oidc
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ needs.tag.outputs.tag }}
+          persist-credentials: false
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: "22"
           cache: "npm"
@@ -140,10 +221,9 @@ jobs:
       - run: npm ci
 
       - name: Sync server.json version from package.json / tag
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            export VERSION="${GITHUB_REF_NAME#v}"
-          fi
           npm run sync:server-json
           npm run check:server-json
           cat server.json
