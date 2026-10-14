@@ -195,7 +195,7 @@ jobs:
       # Provenance is automatic with trusted publishing.
       - name: Publish to npm
         if: steps.npm.outputs.published != 'true'
-        run: npm publish "dist-npm/zenrows-mcp-$RELEASE_VERSION.tgz" --access public --ignore-scripts
+        run: npm publish "./dist-npm/zenrows-mcp-$RELEASE_VERSION.tgz" --access public --ignore-scripts
 
   # Official MCP Registry (registry.modelcontextprotocol.io). After npm: the
   # package must exist for the ownership checks.
