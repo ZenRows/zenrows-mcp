@@ -101,8 +101,8 @@ concurrency slot.
 Credit costs per request: 1 basic, 5 js_render, 10 premium_proxy, 25 both.
 
 AUTH004 ("usage exceeded") means this allowance is spent until it renews at the end of
-the billing period. More credits: a credit pack at https://app.zenrows.com/billing?topup=open or a
-plan change at https://app.zenrows.com/plans; this tool's response has the plan's prices.
+the billing period (period_ends_at in this tool's response). Plans and credit options are
+described at https://www.zenrows.com/pricing.
 AUTH006 is the concurrency limit, not a credit limit.
 
 AUTH014 (Batch: api_key_cap_reached) means this API key hit one of its own credit caps
