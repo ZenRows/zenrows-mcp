@@ -147,7 +147,7 @@ function problemToError(status: number, body: string, method: string, path: stri
     return new BatchError({
       code: "BATCH_ACCESS_DENIED",
       message:
-        "The Batch API rejected this request (access denied). This account does not have Batch API access. Contact Zenrows support, or fan out with scrape/extract per URL.",
+        "The Batch API rejected this request (access denied). Batch is not enabled for this account or API key. Check that the key is active and contact Zenrows support if this persists, or fan out with scrape/extract per URL.",
       status,
       detail: cause,
     });

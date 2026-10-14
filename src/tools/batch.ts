@@ -112,7 +112,7 @@ configuration; that turns automatic mode off for the affected tasks and bills
 them at that configuration's cost.
 
 Returns job_id + latest_run.status/stats. batch_status and batch_wait report progress; batch_results lists the results.
-If you get BATCH_ACCESS_DENIED, the account does not have Batch API access.`,
+If you get BATCH_ACCESS_DENIED, Batch is not enabled for this account or API key.`,
       inputSchema: {
         tasks: z
           .array(taskSchema)
