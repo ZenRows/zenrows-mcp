@@ -178,6 +178,38 @@ npm run test:e2e
 
 The crawl is billed to the key's account (at most 5 page fetches), and it counts against the account's limit of active jobs (3 by default), shared with its Batch jobs. When the account has reached that limit, the test waits and retries for up to 5 minutes.
 
+### Releases
+
+Merge PRs with Conventional Commit titles, for example `fix(extract): ...` or
+`feat(crawl): ...`. `fix`, `feat` and `perf` need a scope.
+
+After each merge to `main`, release-please opens or updates the PR
+`chore: release X.Y.Z`. It sets the version in `package.json`,
+`package-lock.json` and `server.json`. Do not change these by hand.
+
+To release, merge that PR. The Release workflow runs the checks, creates the
+tag `vX.Y.Z` and the GitHub release, and starts the Publish workflow. That
+workflow publishes to npm and the MCP Registry, pushes the GHCR image and
+deploys the hosted server.
+
+To publish an existing tag again, run the Release workflow by hand from
+`main` with that tag.
+
+#### If the checks fail after the release PR is merged
+
+The release PR runs no CI, so its checks first run after the merge. If they
+fail, `main` already has the new version, but there is no tag, and the
+merged release PR keeps the `autorelease: pending` label, which blocks the
+next release PR. To recover:
+
+1. Fix the problem in a normal PR and merge it.
+2. Create the release on that fix commit, with the version from
+   `.release-please-manifest.json`:
+   `gh release create vX.Y.Z --target <fix commit> --title vX.Y.Z --generate-notes --notes-start-tag <previous tag>`
+3. On the merged release PR, replace the label `autorelease: pending` with
+   `autorelease: tagged`.
+4. Run the Release workflow by hand from `main` with the tag `vX.Y.Z`.
+
 Pull requests and issues are welcome.
 
 ---
