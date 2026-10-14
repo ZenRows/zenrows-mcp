@@ -99,7 +99,7 @@ export function registerBatchTools(server: McpServer, apiKey: string): void {
     "batch_create",
     {
       annotations: { title: "Create Batch Job", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: `Submit a cloud Batch job that fans out many URLs asynchronously (Zenrows Batch API beta).
+      description: `Submit a cloud Batch job that fans out many URLs asynchronously (Zenrows Batch API).
 
 NOT the same as browser_batch — this hits https://async.api.zenrows.com/v1 with X-API-Key.
 Suited to large URL lists; scrape and extract handle single pages.
@@ -112,7 +112,7 @@ zenrows_params) only to force a fixed configuration; that turns Adaptive Stealth
 Mode off for the affected tasks and bills them at that configuration's cost.
 
 Returns job_id + latest_run.status/stats. batch_status and batch_wait report progress; batch_results lists the results.
-If you get BATCH_ACCESS_DENIED, the account lacks Batch beta access.`,
+If you get BATCH_ACCESS_DENIED, Batch is not enabled for this account or API key.`,
       inputSchema: {
         tasks: z
           .array(taskSchema)
