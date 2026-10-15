@@ -210,9 +210,16 @@ test("crawl_results on an ended crawl still says partial when the call filled it
 
 test("crawl_create's schema takes only its own inputs and drops unknown ones", () => {
   const shape = register().configs.crawl_create.inputSchema;
-  assert.equal("discovery" in shape, false);
-  const parsed = z.object(shape).parse({ url: "https://example.com/", depth: 1, discovery: ["links"] });
-  assert.equal("discovery" in parsed, false);
+  const parsed = z.object(shape).parse({ url: "https://example.com/", depth: 1, extract_calls: 3 });
+  assert.equal("extract_calls" in parsed, false);
+});
+
+test("crawl_create takes discovery links and refuses any other strategy", () => {
+  const schema = z.object(register().configs.crawl_create.inputSchema);
+  assert.deepEqual(schema.parse({ url: "https://example.com/", discovery: ["links"] }).discovery, ["links"]);
+  for (const discovery of [["pagination"], ["links", "pagination"], []]) {
+    assert.equal(schema.safeParse({ url: "https://example.com/", discovery }).success, false, JSON.stringify(discovery));
+  }
 });
 
 test("crawl_create sends only the fields the caller set", async () => {
@@ -236,6 +243,7 @@ test("crawl_create sends only the fields the caller set", async () => {
         exclude_patterns: null,
         output_format: "html",
       });
+      await handlers.crawl_create({ url: "https://example.com/", discovery: ["links"] });
     }
   );
   assert.deepEqual(bodies[0], { url: "https://example.com/", depth: 2 });
@@ -249,6 +257,7 @@ test("crawl_create sends only the fields the caller set", async () => {
     include_patterns: ["/product/"],
     output_format: "html",
   });
+  assert.deepEqual(bodies[4], { url: "https://example.com/", discovery: ["links"] }, "discovery sent as given");
 });
 
 test("crawl_create takes idempotency_key and has no follow or timeout", () => {

@@ -108,7 +108,9 @@ await check(
   "Start the server from the README's stdio config",
   "the server starts and answers tools/list",
   async () => {
-    srv = await startServer(HAS_KEY ? KEY : "invalid");
+    // The server reads its own variable, not CRAWL_API_BASE: without this it would
+    // reach production whatever the run targets.
+    srv = await startServer(HAS_KEY ? KEY : "invalid", { ZENROWS_CRAWL_API_BASE: H.API_BASE });
     const t = await srv.client.listTools();
     return {
       status: passIf(t.tools.length > 0),
@@ -688,6 +690,29 @@ await liveCheck(
     };
   },
 );
+await liveCheck(
+  "23",
+  "Discovery",
+  'crawl_create with discovery ["links"] is echoed back; a create without it reads ["links"]; pagination is refused before the API',
+  async () => {
+    const given = await create({ ...base, max_items: 1, max_pages: 1, discovery: ["links"] });
+    const leftOut = await create({ ...base, max_items: 1, max_pages: 1 });
+    for (const c of [given, leftOut]) {
+      if (c?.crawl_id) await call(S, "crawl_stop", { crawl_id: c.crawl_id });
+    }
+    const refused = await call(S, "crawl_create", { ...base, discovery: ["pagination"] });
+    if (!refused.isError && refused.data?.crawl_id) {
+      ledger(refused.data.crawl_id, "discovery pagination (accepted)");
+      await call(S, "crawl_stop", { crawl_id: refused.data.crawl_id });
+    }
+    const one = JSON.stringify(["links"]);
+    const ok = JSON.stringify(given?.discovery) === one && JSON.stringify(leftOut?.discovery) === one && refused.isError;
+    return {
+      status: passIf(ok),
+      actual: JSON.stringify({ given: given?.discovery, leftOut: leftOut?.discovery, paginationRefused: refused.isError }),
+    };
+  },
+);
 await check("15", "Bad key", "AUTH_INVALID", async () => {
   const bad = await startServer("invalid");
   const r = await call(bad.client, "crawl_get", { crawl_id: "c_does_not_exist" });
@@ -775,6 +800,7 @@ H.naming({
       "include_patterns",
       "exclude_patterns",
       "output_format",
+      "discovery",
       "idempotency_key",
       "cursor",
       "limit",

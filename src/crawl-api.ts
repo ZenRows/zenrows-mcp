@@ -78,6 +78,8 @@ export interface CreateCrawlBody {
   include_patterns?: string[];
   exclude_patterns?: string[];
   output_format?: "html" | "markdown";
+  /** How the crawl finds the URLs it follows on each page it walks. */
+  discovery?: "links"[];
 }
 
 export interface ProblemJson {

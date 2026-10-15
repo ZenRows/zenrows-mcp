@@ -209,6 +209,13 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .describe(
             "'html' or 'markdown' also stores each kept URL's page for crawl_content, as fetched or converted to Markdown. Omit for URLs only."
           ),
+        discovery: z
+          .array(z.enum(["links"]))
+          .min(1)
+          .nullish()
+          .describe(
+            "How the crawl finds the URLs it follows on each page it walks. ['links'] follows the links in each page's HTML, and is what a crawl runs with when you omit this."
+          ),
         idempotency_key: z
           .string()
           .min(1)
@@ -226,6 +233,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       if (params.include_patterns?.length) body.include_patterns = params.include_patterns;
       if (params.exclude_patterns?.length) body.exclude_patterns = params.exclude_patterns;
       if (params.output_format) body.output_format = params.output_format;
+      if (params.discovery?.length) body.discovery = params.discovery;
 
       try {
         return crawlOut(await createCrawl(body, { ...call, idempotencyKey: params.idempotency_key ?? undefined }));
