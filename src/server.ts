@@ -389,7 +389,14 @@ Examples:
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
   registerBrowserTools(server, apiKey, BROWSER_URL, getClientName);
 
-  // Always expose account resource; handler re-reads disk so ZENROWS_HOME is visible.
+  // The handler re-reads disk so ZENROWS_HOME is visible. The account file lives on the user's machine. A hosted server would read its own
+  // disk instead, which never holds the caller's account, so it does not offer this.
+  if (!options.hosted) registerAccountResource(server);
+
+  return server;
+}
+
+function registerAccountResource(server: McpServer) {
   server.registerResource(
     "zenrows-account",
     "zenrows://account",
@@ -425,6 +432,4 @@ Examples:
       };
     }
   );
-
-  return server;
 }
