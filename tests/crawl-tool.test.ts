@@ -102,9 +102,17 @@ test("crawl_create's description says an omitted depth means no depth limit, and
   assert.doesNotMatch(c.description, /default 10\)/);
 });
 
-test("crawl_create's description says a crawl whose patterns match nothing still bills the start page", () => {
-  const c = register().configs.crawl_create;
-  assert.match(c.description, /match\s+nothing still costs that one scrape/);
+test("crawl's descriptions say patterns filter what is returned and the pages opened to reach matches are billed", () => {
+  const { configs } = register();
+  const c = configs.crawl_create;
+  const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
+  assert.match(c.description, /filter the URLs the crawl returns, not the pages it opens/);
+  assert.match(c.description, /each of those fetches is billed and counts\s+toward max_pages/);
+  assert.match(c.description, /match nothing ends completed with no results/);
+  assert.doesNotMatch(c.description, /still costs that one scrape/);
+  assert.match(String(shape.max_pages.description), /including pages opened only to reach URLs that match/);
+  assert.match(String(shape.include_patterns.description), /billed and count toward max_pages/);
+  assert.match(configs.crawl_get.description, /completed with no results while include_patterns/);
 });
 
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
@@ -366,7 +374,14 @@ test("crawl_get carries crawl_id on an error", async () => {
 
 test("a crawl that ended failed comes back ok: false with its error, from crawl_wait and crawl_get", async () => {
   const { handlers } = register();
-  const failed = { ...crawl("failed"), error: { code: "no_items_found", detail: "No link matched the URL patterns." } };
+  const failed = {
+    ...crawl("failed"),
+    error: {
+      code: "no_items_found",
+      detail:
+        "The crawl found no items: the pages it fetched held no links or listings it could follow. The site may have served a block or consent page, or a page that shows its links only to a browser; check the URL in a browser.",
+    },
+  };
   for (const call of [
     () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
     () => handlers.crawl_get({ crawl_id: "c_1" }),
@@ -378,7 +393,7 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     assert.equal(body.crawl_id, "c_1");
     assert.equal(body.error.code, "CRAWL_FAILED");
     assert.equal(body.error.server_code, "no_items_found");
-    assert.match(body.error.message, /No link matched/);
+    assert.match(body.error.message, /held no links or listings it could follow/);
   }
 });
 

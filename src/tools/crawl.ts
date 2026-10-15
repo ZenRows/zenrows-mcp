@@ -166,16 +166,19 @@ export function registerCrawlTools(server: McpServer, apiKey: string, options: C
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops (no depth limit when depth is omitted), keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
+      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops (no depth limit when depth is omitted), returns the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
 
 ${WHEN_TO_USE}
 
 Each page fetched is billed as one scrape on this account; max_pages bounds the cost
 (default 100), max_items bounds how many URLs are kept (default 100). Without depth, the
 crawl keeps following links until max_pages or max_items stops it or nothing is left to
-open, so set max_pages to what you are willing to spend. The start page itself is never
-a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
-nothing still costs that one scrape. Set output_format "html" or "markdown" to also store each kept URL's page,
+open, so set max_pages to what you are willing to spend. include_patterns / exclude_patterns
+filter the URLs the crawl returns, not the pages it opens: it still opens pages on the site
+that fail them, to reach pages that match, and each of those fetches is billed and counts
+toward max_pages. The start page itself is never a result, but its fetch is billed. A crawl
+whose patterns match nothing ends completed with no results, and can still cost up to
+max_pages scrapes. Set output_format "html" or "markdown" to also store each kept URL's page,
 then read it with crawl_content.
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
@@ -202,16 +205,20 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .max(100_000)
           .nullish()
           .describe(
-            "Stop once this many pages are fetched, each billed as one scrape (default 100). With output_format, every kept URL's page counts too."
+            "Stop once this many pages are fetched, each billed as one scrape (default 100). Every page counts, including pages opened only to reach URLs that match the patterns. With output_format, every kept URL's page counts too."
           ),
         include_patterns: z
           .array(z.string().min(1))
           .nullish()
-          .describe('Keep only URLs containing at least one of these substrings, e.g. ["/product/"]'),
+          .describe(
+            'Return only URLs containing at least one of these substrings, e.g. ["/product/"]. The crawl still opens pages that do not match, to reach ones that do; those fetches are billed and count toward max_pages.'
+          ),
         exclude_patterns: z
           .array(z.string().min(1))
           .nullish()
-          .describe("Drop URLs containing any of these substrings, even if they match include_patterns"),
+          .describe(
+            "Return no URL containing any of these substrings, even if it matches include_patterns. The crawl may still open it to follow its links."
+          ),
         output_format: z
           .enum(["html", "markdown"])
           .nullish()
@@ -250,7 +257,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
-completed with stop_reason max_items / max_pages means a limit ended it; stopped with stop_reason user means crawl_stop ended it; stopped with no stop_reason and error.code insufficient_credits or api_key_cap_reached means the account ran out of credits or the API key hit a credit cap (the URLs kept before that stay readable); failed carries error.code and error.detail. A failed crawl, and a stopped one with an error, answer ok: false: error.code is CRAWL_INSUFFICIENT_CREDITS or CRAWL_KEY_CAP_REACHED (the codes crawl_create gets on a 402) when credits ended it, failed or stopped, else CRAWL_FAILED; error.server_code is the crawl's error.code. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
+completed with stop_reason max_items / max_pages means a limit ended it; stopped with stop_reason user means crawl_stop ended it; stopped with no stop_reason and error.code insufficient_credits or api_key_cap_reached means the account ran out of credits or the API key hit a credit cap (the URLs kept before that stay readable); completed with no results while include_patterns / exclude_patterns are set means no URL the crawl read matched them; loosen them, or raise depth or max_pages. failed carries error.code and error.detail. A failed crawl, and a stopped one with an error, answer ok: false: error.code is CRAWL_INSUFFICIENT_CREDITS or CRAWL_KEY_CAP_REACHED (the codes crawl_create gets on a 402) when credits ended it, failed or stopped, else CRAWL_FAILED; error.server_code is the crawl's error.code. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_get call, to continue from there"),
