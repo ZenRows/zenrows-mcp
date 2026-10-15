@@ -109,8 +109,8 @@ export function domainNotPreparedError(url: string, status: number, body: string
     return JSON.stringify({
       ...common,
       message:
-        `Extract serves ${domain} but did not recognise this page as one it can extract (it may be a home, ` +
-        `search, login or category page). ${PAGE_NOT_RECOGNISED_STEPS} The request was not charged.`,
+        `Extract serves ${domain} but did not recognise this page as one it can extract (it may be a page with ` +
+        `nothing to extract, such as a home page). ${PAGE_NOT_RECOGNISED_STEPS} The request was not charged.`,
     });
   }
   if (reason === "domain_not_enabled") {
@@ -378,7 +378,7 @@ Modes:
     URLs (a few minutes, no credits), poll prepared_domain_status about every
     30 seconds until it says ready, then call extract again.
   - page_not_recognised: the domain is prepared, but this page is not one
-    Extract extracts (a home, search, login or category page). Try a product,
+    Extract extracts (a page with nothing to extract, such as a home page). Try a product,
     article or listing page instead; if this page should work, retry it once in
     a few minutes; otherwise use mode=css. Do not prepare the domain again.
   - domain_not_enabled: preparing does not help; use mode=css.

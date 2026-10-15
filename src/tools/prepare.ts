@@ -130,8 +130,8 @@ export function failureNextStep(failure: PreparedDomain["failure"]): string {
 /**
  * What to do when a page on a prepared domain answers REQS007 with reason page_not_recognised,
  * in the gateway's own order. On a prepared domain Extract learns a new kind of page on its
- * first request, so that answer means this page is not one Extract extracts (a home, search,
- * login or category page) or a transient failure kept it from trying, never that the domain
+ * first request, so that answer means this page is not one Extract extracts (a page with
+ * nothing to extract, such as a home page) or a transient failure kept it from trying, never that the domain
  * needs preparing again: resubmitting returns the existing ready record, so pointing there
  * would loop.
  */
