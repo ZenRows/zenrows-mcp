@@ -265,6 +265,31 @@ export async function crawlRequest<T>(method: string, path: string, opts: Reques
   }
 }
 
+/**
+ * The code and advice for a request or a crawl that credits ended: this API key at one of its
+ * credit caps (`AUTH014`, `api_key_cap_reached`), else the account out of credits. A create
+ * refused with 402 and a crawl that ended on `insufficient_credits` or `api_key_cap_reached`
+ * share them, so an agent sees one code for one cause.
+ */
+export function creditError(serverCode: string | undefined): { code: string; cause: string; advice: string } {
+  if (serverCode === "AUTH014" || serverCode === "api_key_cap_reached") {
+    return {
+      code: "CRAWL_KEY_CAP_REACHED",
+      cause: "This API key reached one of its credit caps",
+      advice:
+        "The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail).",
+    };
+  }
+  return {
+    code: "CRAWL_INSUFFICIENT_CREDITS",
+    cause: "This account has no credits left",
+    advice: "Add credits, then retry.",
+  };
+}
+
+/** The `error.code` values with which the credits end a crawl, `stopped` (or `failed` on older deployments). */
+export const CRAWL_CREDIT_CODES: ReadonlySet<string> = new Set(["insufficient_credits", "api_key_cap_reached"]);
+
 export function problemToError(
   status: number,
   body: string,
@@ -320,17 +345,9 @@ export function problemToError(
       retryAfter
     );
   }
-  if (status === 402 && (serverCode === "AUTH014" || serverCode === "api_key_cap_reached")) {
-    return error(
-      "CRAWL_KEY_CAP_REACHED",
-      "This API key reached one of its credit caps, so the Crawl API refused the request. The account's other API keys still work. Raise or remove the cap at https://app.zenrows.com/settings/api-keys, or wait until it resets (see detail)."
-    );
-  }
   if (status === 402) {
-    return error(
-      "CRAWL_INSUFFICIENT_CREDITS",
-      "This account has no credits left, so the Crawl API refused the request. Add credits, then retry."
-    );
+    const credit = creditError(serverCode);
+    return error(credit.code, `${credit.cause}, so the Crawl API refused the request. ${credit.advice}`);
   }
   if (status === 409) {
     return error(

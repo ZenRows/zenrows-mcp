@@ -382,21 +382,60 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
   }
 });
 
-test("a crawl stopped on credits comes back ok: false with its error code", async () => {
+test("a crawl the credits ended comes back ok: false with the code a 402 create gets, stopped or failed", async () => {
   const { handlers } = register();
-  for (const code of ["insufficient_credits", "api_key_cap_reached"]) {
-    const stopped = { ...crawl("stopped"), error: { code, detail: "Batch stopped the crawl." } };
+  const cases = [
+    { status: "stopped", server: "insufficient_credits", code: "CRAWL_INSUFFICIENT_CREDITS", advice: /Add credits/ },
+    {
+      status: "stopped",
+      server: "api_key_cap_reached",
+      code: "CRAWL_KEY_CAP_REACHED",
+      advice: /Raise or remove the cap/,
+    },
+    // Older deployments end such a crawl failed: agents see the same code.
+    { status: "failed", server: "insufficient_credits", code: "CRAWL_INSUFFICIENT_CREDITS", advice: /Add credits/ },
+    {
+      status: "failed",
+      server: "api_key_cap_reached",
+      code: "CRAWL_KEY_CAP_REACHED",
+      advice: /Raise or remove the cap/,
+    },
+  ];
+  for (const k of cases) {
+    const label = `${k.status} ${k.server}`;
+    const ended = { ...crawl(k.status), error: { code: k.server, detail: "Batch stopped the crawl." } };
     const out = await withFetch(
-      () => jsonResponse({ ...stopped, results: [], next_cursor: null }),
+      () => jsonResponse({ ...ended, results: [], next_cursor: null }),
       () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
     );
     const body = JSON.parse(out.content[0].text);
-    assert.equal(body.ok, false, code);
-    assert.equal(body.status, "stopped");
-    assert.equal(body.error.code, "CRAWL_FAILED");
-    assert.equal(body.error.server_code, code);
-    assert.match(body.error.message, /stopped/);
+    assert.equal(body.ok, false, label);
+    assert.equal(body.status, k.status, label);
+    assert.equal(body.crawl_id, "c_1", label);
+    assert.equal(body.error.code, k.code, label);
+    assert.equal(body.error.server_code, k.server, label);
+    assert.equal(body.error.detail, "Batch stopped the crawl.", label);
+    assert.match(
+      body.error.message,
+      new RegExp(`Crawl c_1 ${k.status} \\(${k.server}\\): Batch stopped the crawl\\.`),
+      label
+    );
+    assert.match(body.error.message, k.advice, label);
   }
+});
+
+test("a crawl stopped with any other error code comes back ok: false with CRAWL_FAILED", async () => {
+  const { handlers } = register();
+  const stopped = { ...crawl("stopped"), error: { code: "internal", detail: "Something broke." } };
+  const out = await withFetch(
+    () => jsonResponse({ ...stopped, results: [], next_cursor: null }),
+    () => handlers.crawl_get({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.ok, false);
+  assert.equal(body.error.code, "CRAWL_FAILED");
+  assert.equal(body.error.server_code, "internal");
+  assert.match(body.error.message, /stopped \(internal\): Something broke/);
 });
 
 test("a crawl that did not fail stays ok: true with no error", async () => {
