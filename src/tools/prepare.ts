@@ -75,7 +75,14 @@ function json(data: unknown): { content: TextContent[] } {
   return { content: [{ type: "text", text: JSON.stringify(data) }] };
 }
 
-/** A domain as the API wants it: the host, no scheme, path or leading `www.`. Accepts a URL too. */
+/**
+ * A domain as the API keys it: the host, no scheme, path or leading `www.`. Accepts a URL too.
+ *
+ * Deliberately not the registrable domain: Extract prepares and serves each host on its
+ * own. A prepared `es.wikipedia.org` does not cover `pt.wikipedia.org` (REQS007 names
+ * `pt.wikipedia.org`), and `wikipedia.org` has no record of its own. The API itself folds
+ * `www.` into the bare host, so dropping it here matches what it stores.
+ */
 export function normalizeDomain(input: string): string {
   const trimmed = input.trim();
   let host = trimmed;
@@ -87,28 +94,60 @@ export function normalizeDomain(input: string): string {
   return host.toLowerCase().replace(/^www\./, "");
 }
 
-/** What to do after a failed preparation, by failure.code (docs.zenrows.com extract/endpoints). */
-export function failureNextStep(code: string | undefined): string {
-  switch (code) {
-    case "interrupted":
-    case "preparation_exhausted":
-      return "Call prepare_domain again with the same domain and example URLs. This did not use an allowance slot.";
-    case "discovery_failed":
-      return "Call prepare_domain again with example_urls (1 to 5 page URLs). This did not use an allowance slot.";
-    case "unpreparable":
-      return "Call prepare_domain again with different example URLs from the same site; the same URLs fail again. This did not use an allowance slot.";
-    case "preparation_failed":
-      return "Try other example URLs, or contact Zenrows support. This used an allowance slot.";
-    default:
-      return "Contact Zenrows support before preparing this domain again. Meanwhile use extract with mode=css.";
-  }
+/** How often an agent should poll prepared_domain_status. */
+export const POLL_INTERVAL_SECONDS = 30;
+
+/** Whether a failed preparation used an allowance slot, from the record's failure.slot_consumed. */
+function slotSentence(slotConsumed: boolean | undefined): string {
+  if (slotConsumed === true) return " This attempt used an allowance slot.";
+  if (slotConsumed === false) return " This attempt did not use an allowance slot.";
+  return "";
 }
 
-/** The next step for a status record, so an agent never has to infer it. */
-export function statusNextStep(record: PreparedDomain): string {
-  if (record.status === "ready") return "The domain is ready: call extract again.";
-  if (record.status === "failed") return failureNextStep(record.failure?.code);
-  return "Preparation is running and takes a few minutes. Call prepared_domain_status again in about 30 seconds; call extract once status is ready.";
+/** What to do after a failed preparation, by failure.code (docs.zenrows.com extract/endpoints). */
+export function failureNextStep(failure: PreparedDomain["failure"]): string {
+  let step: string;
+  switch (failure?.code) {
+    case "interrupted":
+    case "preparation_exhausted":
+      step = "Call prepare_domain again with the same domain and example URLs.";
+      break;
+    case "discovery_failed":
+      step = "Call prepare_domain again with example_urls (1 to 5 page URLs).";
+      break;
+    case "unpreparable":
+      step = "Call prepare_domain again with different example URLs from the same site; the same URLs fail again.";
+      break;
+    case "preparation_failed":
+      step = "Try other example URLs, or contact Zenrows support.";
+      break;
+    default:
+      step = "Contact Zenrows support before preparing this domain again. Meanwhile use extract with mode=css.";
+  }
+  return step + slotSentence(failure?.slot_consumed);
+}
+
+/**
+ * What an already-prepared domain means for an extract that answered REQS007: that kind of
+ * page is not covered, and preparing the domain again does not change it (the API returns
+ * the existing ready record). Said instead of "call extract again", which would loop.
+ */
+export const PAGE_KIND_NOT_COVERED =
+  "If extract still answers REQS007 for a URL on this domain, that kind of page is not covered and preparing the " +
+  "domain again does not change it. Use extract with mode=css and a css_extractor, or contact Zenrows support with the URL.";
+
+/**
+ * The next step for a status record, so an agent never has to infer it. `alreadyReady` is
+ * set when a submit answered ready at once: the domain was prepared before this call.
+ */
+export function statusNextStep(record: PreparedDomain, opts: { alreadyReady?: boolean } = {}): string {
+  if (record.status === "ready") {
+    return opts.alreadyReady
+      ? `${record.domain} was already prepared, so nothing new was submitted. ${PAGE_KIND_NOT_COVERED}`
+      : `The domain is ready: call extract again. ${PAGE_KIND_NOT_COVERED}`;
+  }
+  if (record.status === "failed") return failureNextStep(record.failure);
+  return `Preparation is running and takes a few minutes. Call prepared_domain_status again in about ${POLL_INTERVAL_SECONDS} seconds; call extract once status is ready.`;
 }
 
 function problem(body: string): { code?: string; detail?: string; title?: string; [k: string]: unknown } {
@@ -257,7 +296,18 @@ export async function runPrepareDomain(apiKey: string, input: PrepareInput, opts
     body: { domain, example_urls: input.example_urls },
     headers: input.idempotency_key ? { "Idempotency-Key": input.idempotency_key } : undefined,
   });
-  if (submitted.ok) return { ok: true as const, data: { ...submitted.data, next: statusNextStep(submitted.data) } };
+  if (submitted.ok) {
+    // A submit that answers ready at once found the domain already prepared.
+    const alreadyReady = submitted.data.status === "ready";
+    return {
+      ok: true as const,
+      data: {
+        ...submitted.data,
+        ...(alreadyReady ? { already_prepared: true } : {}),
+        next: statusNextStep(submitted.data, { alreadyReady }),
+      },
+    };
+  }
   if (submitted.error.code === "in_progress") {
     const current = await getPreparedDomain(apiKey, domain, opts);
     if (current.ok) {
@@ -305,7 +355,9 @@ Send the domain and 1 to 5 example URLs: real pages of the kinds you want extrac
 one per kind (for example one product page and one listing page).
 Returns at once with status "preparing"; preparation takes a few minutes and costs
 no credits. Then call prepared_domain_status about every 30 seconds until status is
-"ready", and call extract again. Each new domain uses one slot of the account's monthly
+"ready", and call extract again. If it answers "ready" at once (already_prepared), the
+domain was prepared before: an extract that still answers REQS007 means that kind of
+page is not covered; use mode=css or contact support with the URL, do not resubmit. Each new domain uses one slot of the account's monthly
 allowance (prepared_domain_status shows it). If the domain is already being prepared,
 this returns its current status instead of submitting again.`,
       inputSchema: {

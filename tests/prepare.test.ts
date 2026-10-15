@@ -207,14 +207,32 @@ test("prepared_domain_status on failed names the step for the failure code", asy
   assert.match(String(out.data.next), /with example_urls/);
 });
 
-test("failureNextStep covers every documented failure code", () => {
-  assert.match(failureNextStep("interrupted"), /again with the same/);
-  assert.match(failureNextStep("preparation_exhausted"), /again with the same/);
-  assert.match(failureNextStep("discovery_failed"), /example_urls/);
-  assert.match(failureNextStep("unpreparable"), /different example URLs/);
-  assert.match(failureNextStep("preparation_failed"), /other example URLs/);
-  assert.match(failureNextStep("verification_failed"), /support/);
-  assert.match(failureNextStep("unsupported"), /support/);
+test("failureNextStep: the step comes from failure.code, the slot sentence from failure.slot_consumed", () => {
+  assert.match(failureNextStep({ code: "interrupted" }), /again with the same/);
+  assert.match(failureNextStep({ code: "preparation_exhausted" }), /again with the same/);
+  assert.match(failureNextStep({ code: "discovery_failed" }), /with example_urls/);
+  assert.match(failureNextStep({ code: "unpreparable" }), /different example URLs/);
+  assert.match(failureNextStep({ code: "preparation_failed" }), /other example URLs/);
+  assert.match(failureNextStep({ code: "verification_failed" }), /support/);
+  assert.match(failureNextStep({ code: "unsupported" }), /support/);
+  assert.match(failureNextStep({ code: "unpreparable", slot_consumed: false }), /did not use an allowance slot/);
+  assert.match(failureNextStep({ code: "unpreparable", slot_consumed: true }), /This attempt used an allowance slot/);
+  assert.doesNotMatch(failureNextStep({ code: "unpreparable" }), /slot/);
+});
+
+test("prepare_domain answering ready at once says the domain was already prepared, not to retry extract", async () => {
+  const { fetchImpl } = stub({ [`POST ${BASE}`]: () => res(202, { ...RECORD, status: "ready", state: "ready" }) });
+  const out = await runPrepareDomain(
+    "k",
+    { domain: "example.com", example_urls: ["https://example.com/search"] },
+    { fetchImpl }
+  );
+  assert.equal(out.ok, true);
+  if (!out.ok) return;
+  assert.equal(out.data.already_prepared, true);
+  assert.match(String(out.data.next), /already prepared/);
+  assert.match(String(out.data.next), /mode=css/);
+  assert.doesNotMatch(String(out.data.next), /call extract again/);
 });
 
 test("prepared_domain_status still returns the record when the allowance call fails", async () => {

@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import { buildExtractParams, isEmptyData, registerExtractTool, runExtract, zrErrorCode } from "../src/tools/extract.ts";
+import {
+  buildExtractParams,
+  isEmptyData,
+  isPageNotRecognised,
+  registerExtractTool,
+  runExtract,
+  zrErrorCode,
+} from "../src/tools/extract.ts";
 
 /** Minimal stand-in for McpServer#registerTool — captures the handler so we can call it directly. */
 function fakeServer() {
@@ -81,7 +88,7 @@ test("runExtract falls back to autoparse on AUTH010 only when fallback_autoparse
 
 const PREPARE_MESSAGE =
   'Extract hasn\'t prepared example.com yet. Call prepare_domain with domain "example.com" and 1 to 5 example URLs ' +
-  "(a few minutes, no credits), then retry once prepared_domain_status says ready; or run with mode=autoparse.";
+  "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css.";
 
 test("runExtract reports REQS007 by default with the prepare step, in one call", async () => {
   const calls: string[] = [];
@@ -107,6 +114,54 @@ test("runExtract reports REQS007 by default with the prepare step, in one call",
     arguments: { domain: "example.com", example_urls: ["https://www.example.com/item/1"] },
   });
   assert.match(body.then, /prepared_domain_status/);
+});
+
+test("runExtract on REQS007 for a page a prepared domain does not recognise points to css, not prepare_domain", async () => {
+  // The gateway's body for a prepared domain whose page it did not recognise.
+  const body = JSON.stringify({
+    code: "REQS007",
+    title: "Extract did not recognise this page on example.com (REQS007)",
+    detail:
+      "Extract serves example.com, but did not recognise this page as one it can extract. It may be a home, search, login or category page.",
+    status: 403,
+  });
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return new Response(body, { status: 403 });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com/search?q=x" }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls, 1);
+  const err = JSON.parse(outcome.errorText) as { code: string; reason: string; message: string; next_tool?: unknown };
+  assert.equal(err.code, "REQS007");
+  assert.equal(err.reason, "page_not_recognised");
+  assert.match(err.message, /Preparing the domain again does not help/);
+  assert.match(err.message, /mode=css/);
+  assert.equal(err.next_tool, undefined, "no prepare_domain: it would answer ready and loop");
+  assert.doesNotMatch(outcome.errorText, /autoparse/);
+});
+
+test("isPageNotRecognised tells the two REQS007 bodies apart", () => {
+  assert.equal(
+    isPageNotRecognised(
+      JSON.stringify({
+        code: "REQS007",
+        title: "Extract is not prepared for the requested domain (x.com) (REQS007)",
+        detail: "Extract has not been prepared for x.com yet.",
+      })
+    ),
+    false
+  );
+  assert.equal(
+    isPageNotRecognised(
+      JSON.stringify({ code: "REQS007", detail: "Extract serves x.com, but did not recognise this page" })
+    ),
+    true
+  );
+  assert.equal(isPageNotRecognised("not json"), false);
 });
 
 test("runExtract reports legacy AUTH010 by default like REQS007, in one call", async () => {

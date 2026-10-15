@@ -2,7 +2,7 @@ import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
-import { normalizeDomain } from "./prepare.js";
+import { normalizeDomain, POLL_INTERVAL_SECONDS } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
@@ -67,21 +67,50 @@ const NO_DATA_MESSAGE =
   "set js_render with wait_for, or premium_proxy on protected sites.";
 
 /**
- * The tool error for a domain Extract has not prepared yet. It names the next step,
- * because agents copy it: prepare_domain with this domain, then poll
- * prepared_domain_status.
+ * REQS007 has two causes, which the problem body tells apart: the domain is not prepared
+ * ("Extract is not prepared for the requested domain (...)"), or it is prepared and Extract
+ * did not recognise this page ("Extract did not recognise this page on ...", detail
+ * "Extract serves ..."). Only the first is fixed by preparing the domain; preparing a
+ * prepared domain returns its existing ready record, so pointing there would loop.
+ */
+export function isPageNotRecognised(body: string): boolean {
+  try {
+    const j = JSON.parse(body) as { title?: unknown; detail?: unknown };
+    const title = typeof j.title === "string" ? j.title : "";
+    const detail = typeof j.detail === "string" ? j.detail : "";
+    return /did not recogni[sz]e this page/i.test(title) || /^Extract serves /.test(detail);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The tool error for REQS007 / AUTH010 on mode=auto. It names the next step, because
+ * agents copy it: prepare_domain for a domain not prepared yet, css for a page Extract
+ * does not recognise on a prepared domain. It never offers autoparse.
  */
 export function domainNotPreparedError(url: string, status: number, body: string): string {
   const domain = normalizeDomain(url);
+  const common = { code: zrErrorCode(body) ?? "REQS007", status, detail: body.slice(0, 500) };
+  if (isPageNotRecognised(body)) {
+    return JSON.stringify({
+      ...common,
+      reason: "page_not_recognised",
+      message:
+        `Extract serves ${domain} but did not recognise this page. Preparing the domain again does not help. ` +
+        "Use mode=css with a css_extractor, or contact Zenrows support with the URL.",
+    });
+  }
   return JSON.stringify({
-    code: zrErrorCode(body) ?? "REQS007",
+    ...common,
+    reason: "domain_not_prepared",
     message:
       `Extract hasn't prepared ${domain} yet. Call prepare_domain with domain "${domain}" and 1 to 5 example URLs ` +
-      "(a few minutes, no credits), then retry once prepared_domain_status says ready; or run with mode=autoparse.",
+      "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css.",
     next_tool: { name: "prepare_domain", arguments: { domain, example_urls: [url] } },
-    then: `Call prepared_domain_status with domain "${domain}" about every 30 seconds until status is ready, then call extract again.`,
-    status,
-    detail: body.slice(0, 500),
+    then:
+      `Call prepared_domain_status with domain "${domain}" about every ${POLL_INTERVAL_SECONDS} seconds until status is ready, ` +
+      "then call extract again. If prepare_domain answers already_prepared, do not retry: use mode=css.",
   });
 }
 
@@ -325,10 +354,12 @@ page body. Set include_html to also get the page HTML.
 Modes:
 - auto (default): extract=auto, site-tailored Extract (currently free,
   billing may apply later). Works on any prepared domain, with any API key.
-  On a domain not prepared yet it returns error REQS007. Then call
-  prepare_domain with the domain and 1 to 5 example URLs (a few minutes, no
-  credits), poll prepared_domain_status until it says ready, and call extract
-  again.
+  On a domain not prepared yet it returns error REQS007 (reason
+  domain_not_prepared). Then call prepare_domain with the domain and 1 to 5
+  example URLs (a few minutes, no credits), poll prepared_domain_status until
+  it says ready, and call extract again. REQS007 with reason
+  page_not_recognised means the domain is prepared but this page is not
+  covered: use mode=css, do not prepare again.
 - autoparse: deprecated general-purpose structured JSON on any domain; use only
   when asked for
 - css: css_extractor with an explicit selector map
