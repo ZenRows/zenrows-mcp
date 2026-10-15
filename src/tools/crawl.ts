@@ -457,7 +457,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
 
 The file goes to path when given (a relative path inside ~/.zenrows/crawls; an absolute path or one that leaves that folder fails with INVALID_PATH), else ~/.zenrows/crawls/<crawl_id>.jsonl. An existing file is kept and the call fails with FILE_EXISTS unless overwrite is true.
 
-On a running crawl the file holds only what was kept so far: download again once crawl_wait says it ended. On the hosted server no file is written: the reply gives the download URL and a command to run where your API key is set.`,
+On a running crawl the file holds only what was kept so far: download again once crawl_wait says it ended. After crawl_stop, pages in flight can still add lines for up to 10 minutes: the reply says so with partial: true. On the hosted server no file is written: the reply gives the download URL and a command to run where your API key is set.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         path: z
@@ -480,6 +480,17 @@ On a running crawl the file holds only what was kept so far: download again once
       }
     }
   );
+
+  /** Whether the API still reads pages for a stopped crawl: it keeps next_cursor set until it is done. */
+  async function stillReading(crawlId: string): Promise<boolean> {
+    let cursor: string | undefined;
+    for (;;) {
+      const read = await readResults(crawlId, { ...call, cursor, limit: 10_000 });
+      if (read.next_cursor === null) return false;
+      if (read.results.length === 0 || read.next_cursor === cursor) return true;
+      cursor = read.next_cursor;
+    }
+  }
 
   /** The hosted server has no disk the user can read: hand back where the file is and how to fetch it. */
   async function hostedDownload(crawlId: string) {
@@ -560,16 +571,22 @@ On a running crawl the file holds only what was kept so far: download again once
       throw e;
     }
     const pending = counts.pending ?? 0;
+    // A stop reads `stopped` at once, but the API still reads the pages in flight for up to 10 minutes
+    // and builds the file from what it kept until then. Its next_cursor says when it is done.
+    const reading = status === "stopped" && (await stillReading(crawlId));
     const note =
       status === "running"
         ? "The crawl is still running, so the file holds only what was kept so far. Download again once crawl_wait says it ended."
-        : pending > 0
-          ? `${pending} line(s) are pending, so they have no content yet. Pages in flight when a crawl stops can still finish for up to 10 minutes: download again with overwrite: true to pick them up.`
-          : undefined;
+        : reading
+          ? "The crawl was stopped, but pages fetched before the stop can still add lines for up to 10 minutes: download again later with overwrite: true."
+          : pending > 0
+            ? `${pending} line(s) are pending: the crawl ended before their page was fetched, so they stay without content.`
+            : undefined;
     return {
       ok: true,
       crawl_id: crawlId,
       status,
+      partial: status === "running" || reading,
       path: target,
       lines,
       bytes,

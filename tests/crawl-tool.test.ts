@@ -218,7 +218,11 @@ test("crawl_create takes discovery links and refuses any other strategy", () => 
   const schema = z.object(register().configs.crawl_create.inputSchema);
   assert.deepEqual(schema.parse({ url: "https://example.com/", discovery: ["links"] }).discovery, ["links"]);
   for (const discovery of [["pagination"], ["links", "pagination"], []]) {
-    assert.equal(schema.safeParse({ url: "https://example.com/", discovery }).success, false, JSON.stringify(discovery));
+    assert.equal(
+      schema.safeParse({ url: "https://example.com/", discovery }).success,
+      false,
+      JSON.stringify(discovery)
+    );
   }
 });
 
@@ -739,25 +743,44 @@ test("crawl_download saves every line to <dir>/<crawl_id>.jsonl and counts them"
   const out = await withFetch(
     (u, init) => {
       seen.push(`${init?.method} ${new URL(u).pathname} ${(init?.headers as Record<string, string>)["X-API-Key"]}`);
-      return ndjson(lines, "stopped", true);
+      return new URL(u).pathname.endsWith("/download")
+        ? ndjson(lines, "stopped", true)
+        : jsonResponse({ ...crawl("stopped"), results: lines.map(({ url }) => ({ url })), next_cursor: null });
     },
     () => handlers.crawl_download({ crawl_id: "c_1" })
   );
   assert.equal(out.isError, undefined, out.content[0].text);
   const body = JSON.parse(out.content[0].text);
-  assert.deepEqual(seen, ["GET /v1/crawls/c_1/download k"]);
+  assert.deepEqual(seen, ["GET /v1/crawls/c_1/download k", "GET /v1/crawls/c_1 k"]);
   assert.equal(body.ok, true);
   assert.equal(body.path, join(dir, "c_1.jsonl"));
   assert.equal(body.status, "stopped");
   assert.equal(body.lines, 3);
   assert.deepEqual(body.content_status, { fetched: 2, pending: 1 });
-  assert.match(body.note, /1 line\(s\) are pending.*overwrite: true/);
+  assert.equal(body.partial, false);
+  assert.match(body.note, /1 line\(s\) are pending.*stay without content/);
   const saved = (await readFile(body.path, "utf8"))
     .trim()
     .split("\n")
     .map((l) => JSON.parse(l));
   assert.deepEqual(saved, lines);
   assert.deepEqual(await readdir(dir), ["c_1.jsonl"]);
+});
+
+test("crawl_download on a stopped crawl is partial while the API keeps next_cursor set", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    (u) =>
+      new URL(u).pathname.endsWith("/download")
+        ? ndjson(lines, "stopped")
+        : jsonResponse({ ...crawl("stopped"), results: [], next_cursor: "p2" }),
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.status, "stopped");
+  assert.equal(body.partial, true);
+  assert.match(body.note, /stopped.*download again later/);
 });
 
 test("crawl_download keeps an existing file unless overwrite is true", async () => {
@@ -828,6 +851,7 @@ test("crawl_download on a running crawl says the file is partial", async () => {
   );
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.status, "running");
+  assert.equal(body.partial, true);
   assert.equal("content_status" in body, false, "a URLs-only crawl has no content_status to count");
   assert.match(body.note, /still running.*Download again/);
 });
