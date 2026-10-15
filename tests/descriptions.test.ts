@@ -37,3 +37,25 @@ for (const hosted of [false, true]) {
     assert.deepEqual(hits, []);
   });
 }
+
+test("the server sends instructions at initialize, in the same wording rules", async () => {
+  const server = createServer("k", undefined, { hosted: true });
+  const client = new Client({ name: "descriptions-test", version: "0.0.0" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const instructions = client.getInstructions() ?? "";
+    assert.match(instructions, /scrape/);
+    assert.doesNotMatch(instructions, FLAGGED);
+  } finally {
+    await client.close();
+  }
+});
+
+// Registries score a description under 30 characters as missing.
+for (const hosted of [false, true]) {
+  test(`every tool description is at least 30 characters (hosted=${hosted})`, async () => {
+    const short = (await listTools(hosted)).filter((t) => (t.description ?? "").length < 30).map((t) => t.name);
+    assert.deepEqual(short, []);
+  });
+}
