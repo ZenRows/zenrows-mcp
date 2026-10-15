@@ -128,13 +128,20 @@ export function failureNextStep(failure: PreparedDomain["failure"]): string {
 }
 
 /**
- * What an already-prepared domain means for an extract that answered REQS007: that kind of
- * page is not covered, and preparing the domain again does not change it (the API returns
- * the existing ready record). Said instead of "call extract again", which would loop.
+ * What to do when a page on a prepared domain answers REQS007 with reason page_not_recognised,
+ * in the gateway's own order. On a prepared domain Extract learns a new kind of page on its
+ * first request, so that answer means this page is not one Extract extracts (a home, search,
+ * login or category page) or a transient failure kept it from trying, never that the domain
+ * needs preparing again: resubmitting returns the existing ready record, so pointing there
+ * would loop.
  */
-export const PAGE_KIND_NOT_COVERED =
-  "If extract still answers REQS007 for a URL on this domain, that kind of page is not covered and preparing the " +
-  "domain again does not change it. Use extract with mode=css and a css_extractor, or contact Zenrows support with the URL.";
+export const PAGE_NOT_RECOGNISED_STEPS =
+  "Try a product, article or listing page on the same site instead. If this page should work, retry it once in a " +
+  "few minutes; do not retry in a loop. Otherwise use mode=css with a css_extractor. Preparing the domain again " +
+  "does not change this.";
+
+/** Said once a domain is ready, so an agent that then meets page_not_recognised does not resubmit. */
+const IF_PAGE_NOT_RECOGNISED = `If extract then answers REQS007 with reason page_not_recognised, Extract did not recognise that page. ${PAGE_NOT_RECOGNISED_STEPS}`;
 
 /**
  * The next step for a status record, so an agent never has to infer it. `alreadyReady` is
@@ -143,8 +150,8 @@ export const PAGE_KIND_NOT_COVERED =
 export function statusNextStep(record: PreparedDomain, opts: { alreadyReady?: boolean } = {}): string {
   if (record.status === "ready") {
     return opts.alreadyReady
-      ? `${record.domain} was already prepared, so nothing new was submitted. ${PAGE_KIND_NOT_COVERED}`
-      : `The domain is ready: call extract again. ${PAGE_KIND_NOT_COVERED}`;
+      ? `${record.domain} is already prepared, so nothing new was submitted: call extract. ${IF_PAGE_NOT_RECOGNISED}`
+      : `${record.domain} is ready: call extract again. ${IF_PAGE_NOT_RECOGNISED}`;
   }
   if (record.status === "failed") return failureNextStep(record.failure);
   return `Preparation is running and takes a few minutes. Call prepared_domain_status again in about ${POLL_INTERVAL_SECONDS} seconds; call extract once status is ready.`;
@@ -350,18 +357,24 @@ export function registerPrepareTools(server: McpServer, apiKey: string): void {
       },
       description: `Prepare a domain so extract (mode=auto) works on it.
 
-Use this when extract returns error REQS007 (Extract hasn't prepared the domain yet).
-Send the domain and 1 to 5 example URLs: real pages of the kinds you want extracted,
-one per kind (for example one product page and one listing page).
-Returns at once with status "preparing"; preparation takes a few minutes and costs
-no credits. Then call prepared_domain_status about every 30 seconds until status is
-"ready", and call extract again. If it answers "ready" at once (already_prepared), the
-domain was prepared before: an extract that still answers REQS007 means that kind of
-page is not covered; use mode=css or contact support with the URL, do not resubmit. Each new domain uses one slot of the account's monthly
-allowance (prepared_domain_status shows it). If the domain is already being prepared,
-this returns its current status instead of submitting again.`,
+Use this when extract returns error REQS007 with reason domain_not_prepared. Send the
+domain (the host, e.g. shop.example.com; a leading www. is dropped, and each host is
+prepared separately) and 1 to 5 example URLs: real pages you want extracted, one per page
+kind (for example one product page and one listing page). It returns at once with status
+"preparing" and never waits; preparation takes a few minutes and costs no credits. Then
+call prepared_domain_status about every 30 seconds until status is "ready", and call
+extract again. Each new domain uses one slot of the account's monthly allowance
+(prepared_domain_status shows it). A domain already being prepared returns its current
+status; a domain already prepared returns "ready" at once with already_prepared: true and
+uses no slot.
+
+Do not call this for REQS007 with reason page_not_recognised: the domain is already
+prepared and preparing again does not change that answer.`,
       inputSchema: {
-        domain: z.string().min(1).describe("The site's domain, e.g. example.com (a URL is accepted too)"),
+        domain: z
+          .string()
+          .min(1)
+          .describe("The host to prepare, e.g. shop.example.com (a URL is accepted; a leading www. is dropped)"),
         example_urls: z
           .array(z.string().url())
           .min(1)
@@ -394,10 +407,10 @@ this returns its current status instead of submitting again.`,
       },
       description: `Check a domain submitted with prepare_domain, and the account's monthly allowance.
 
-Returns status (preparing, ready or failed), state (the current step), per-page-kind
-roles, a failure code and detail when it failed, the allowance (used, limit, remaining)
-and "next": what to do now. Call extract again once status is "ready". Poll about every
-30 seconds; preparation takes a few minutes. Costs no credits.`,
+Returns status (preparing, ready or failed), state (the current step), roles (one per page
+kind), a failure code and detail when it failed, the allowance (used, limit, remaining) and
+"next": what to do now. Poll about every 30 seconds; preparation takes a few minutes. Call
+extract again once status is "ready". Costs no credits.`,
       inputSchema: {
         domain: z.string().min(1).describe("The domain passed to prepare_domain, e.g. example.com"),
       },

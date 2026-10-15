@@ -220,7 +220,7 @@ test("failureNextStep: the step comes from failure.code, the slot sentence from 
   assert.doesNotMatch(failureNextStep({ code: "unpreparable" }), /slot/);
 });
 
-test("prepare_domain answering ready at once says the domain was already prepared, not to retry extract", async () => {
+test("prepare_domain answering ready at once says the domain is already prepared and what page_not_recognised then means", async () => {
   const { fetchImpl } = stub({ [`POST ${BASE}`]: () => res(202, { ...RECORD, status: "ready", state: "ready" }) });
   const out = await runPrepareDomain(
     "k",
@@ -230,9 +230,11 @@ test("prepare_domain answering ready at once says the domain was already prepare
   assert.equal(out.ok, true);
   if (!out.ok) return;
   assert.equal(out.data.already_prepared, true);
-  assert.match(String(out.data.next), /already prepared/);
-  assert.match(String(out.data.next), /mode=css/);
-  assert.doesNotMatch(String(out.data.next), /call extract again/);
+  const next = String(out.data.next);
+  assert.match(next, /already prepared, so nothing new was submitted: call extract/);
+  assert.match(next, /page_not_recognised/);
+  assert.match(next, /Preparing the domain again does not change this/);
+  assert.doesNotMatch(next, /not covered|contact Zenrows support|autoparse/);
 });
 
 test("prepared_domain_status still returns the record when the allowance call fails", async () => {

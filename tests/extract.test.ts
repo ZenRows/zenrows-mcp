@@ -7,7 +7,7 @@ import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
 import {
   buildExtractParams,
   isEmptyData,
-  isPageNotRecognised,
+  refusalReason,
   registerExtractTool,
   runExtract,
   zrErrorCode,
@@ -116,52 +116,99 @@ test("runExtract reports REQS007 by default with the prepare step, in one call",
   assert.match(body.then, /prepared_domain_status/);
 });
 
-test("runExtract on REQS007 for a page a prepared domain does not recognise points to css, not prepare_domain", async () => {
-  // The gateway's body for a prepared domain whose page it did not recognise.
-  const body = JSON.stringify({
-    code: "REQS007",
-    title: "Extract did not recognise this page on example.com (REQS007)",
-    detail:
-      "Extract serves example.com, but did not recognise this page as one it can extract. It may be a home, search, login or category page.",
-    status: 403,
-  });
+/** A REQS007 the way the gateway sends it: with `reason`, or (an older gateway) without. */
+function reqs007(kind: "domain" | "page" | "allowlist", withReason: boolean): string {
+  const bodies = {
+    domain: {
+      title: "Extract is not prepared for the requested domain (example.com) (REQS007)",
+      detail: "Extract has not been prepared for example.com yet.",
+      reason: "domain_not_prepared",
+    },
+    page: {
+      title: "Extract did not recognise this page on example.com (REQS007)",
+      detail: "Extract serves example.com, but did not recognise this page as one it can extract.",
+      reason: "page_not_recognised",
+    },
+    allowlist: {
+      title: "Extract is not enabled for the requested domain (example.com) (REQS007)",
+      detail: "Extract is not enabled for the requested domain (example.com) yet.",
+      reason: "domain_not_enabled",
+    },
+  } as const;
+  const { reason, ...rest } = bodies[kind];
+  return JSON.stringify({ code: "REQS007", status: 403, ...rest, ...(withReason ? { reason } : {}) });
+}
+
+async function reqs007Error(body: string, url = "https://example.com/search?q=x") {
   let calls = 0;
   const fetchImpl = (async () => {
     calls++;
     return new Response(body, { status: 403 });
   }) as typeof fetch;
-
-  const outcome = await runExtract("testkey", { url: "https://example.com/search?q=x" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url }, { fetchImpl });
   assert.equal(outcome.ok, false);
-  if (outcome.ok) return;
   assert.equal(calls, 1);
-  const err = JSON.parse(outcome.errorText) as { code: string; reason: string; message: string; next_tool?: unknown };
-  assert.equal(err.code, "REQS007");
-  assert.equal(err.reason, "page_not_recognised");
-  assert.match(err.message, /Preparing the domain again does not help/);
-  assert.match(err.message, /mode=css/);
-  assert.equal(err.next_tool, undefined, "no prepare_domain: it would answer ready and loop");
-  assert.doesNotMatch(outcome.errorText, /autoparse/);
-});
+  if (outcome.ok) throw new Error("unreachable");
+  return {
+    raw: outcome.errorText,
+    err: JSON.parse(outcome.errorText) as { code: string; reason: string; message: string; next_tool?: unknown },
+  };
+}
 
-test("isPageNotRecognised tells the two REQS007 bodies apart", () => {
+for (const withReason of [true, false]) {
+  const via = withReason ? "the reason field" : "the title (gateway without the reason field)";
+
+  test(`REQS007 page_not_recognised, read from ${via}: gateway's advice in order, no prepare_domain`, async () => {
+    const { raw, err } = await reqs007Error(reqs007("page", withReason));
+    assert.equal(err.code, "REQS007");
+    assert.equal(err.reason, "page_not_recognised");
+    const steps = [
+      /product, article or listing page/,
+      /retry it once in a few minutes; do not retry in a loop/,
+      /mode=css with a css_extractor/,
+      /Preparing the domain again does not change this/,
+    ];
+    let last = -1;
+    for (const step of steps) {
+      const at = err.message.search(step);
+      assert.ok(at > last, `${step} missing or out of order in: ${err.message}`);
+      last = at;
+    }
+    assert.equal(err.next_tool, undefined, "no prepare_domain: it would answer ready and loop");
+    assert.doesNotMatch(raw, /autoparse|contact Zenrows support/);
+  });
+
+  test(`REQS007 domain_not_enabled, read from ${via}: no prepare_domain, css`, async () => {
+    const { raw, err } = await reqs007Error(reqs007("allowlist", withReason));
+    assert.equal(err.reason, "domain_not_enabled");
+    assert.match(err.message, /preparing it does not change this/);
+    assert.match(err.message, /mode=css/);
+    assert.equal(err.next_tool, undefined);
+    assert.doesNotMatch(raw, /autoparse/);
+  });
+
+  test(`REQS007 domain_not_prepared, read from ${via}: prepare_domain`, async () => {
+    const { err } = await reqs007Error(reqs007("domain", withReason), "https://www.example.com/p/1");
+    assert.equal(err.reason, "domain_not_prepared");
+    assert.deepEqual(err.next_tool, {
+      name: "prepare_domain",
+      arguments: { domain: "example.com", example_urls: ["https://www.example.com/p/1"] },
+    });
+  });
+}
+
+test("refusalReason trusts the field over the sentence, and ignores a reason it does not know", () => {
+  const pageTitleWithDomainReason = JSON.stringify({
+    code: "REQS007",
+    title: "Extract did not recognise this page on x.com (REQS007)",
+    reason: "domain_not_prepared",
+  });
+  assert.equal(refusalReason(pageTitleWithDomainReason), "domain_not_prepared");
   assert.equal(
-    isPageNotRecognised(
-      JSON.stringify({
-        code: "REQS007",
-        title: "Extract is not prepared for the requested domain (x.com) (REQS007)",
-        detail: "Extract has not been prepared for x.com yet.",
-      })
-    ),
-    false
+    refusalReason(JSON.stringify({ code: "REQS007", reason: "something_new", detail: "Extract serves x.com, but" })),
+    "page_not_recognised"
   );
-  assert.equal(
-    isPageNotRecognised(
-      JSON.stringify({ code: "REQS007", detail: "Extract serves x.com, but did not recognise this page" })
-    ),
-    true
-  );
-  assert.equal(isPageNotRecognised("not json"), false);
+  assert.equal(refusalReason("not json"), "domain_not_prepared");
 });
 
 test("runExtract reports legacy AUTH010 by default like REQS007, in one call", async () => {
