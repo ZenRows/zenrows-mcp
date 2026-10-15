@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
+import { normalizeDomain } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
@@ -65,34 +66,20 @@ const NO_DATA_MESSAGE =
   "Extract found no data on this page (not charged). Check that the page rendered fully: " +
   "set js_render with wait_for, or premium_proxy on protected sites.";
 
-/** The URL's host without a leading `www.`, the domain a caller prepares. */
-function domainOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return url;
-  }
-}
-
 /**
  * The tool error for a domain Extract has not prepared yet. It names the next step,
- * because agents copy it: the prepare request, its body and how to poll it.
+ * because agents copy it: prepare_domain with this domain, then poll
+ * prepared_domain_status.
  */
 export function domainNotPreparedError(url: string, status: number, body: string): string {
-  const domain = domainOf(url);
-  const prepareUrl = `${ZENROWS_API_URL}extract/prepared-domains`;
+  const domain = normalizeDomain(url);
   return JSON.stringify({
     code: zrErrorCode(body) ?? "REQS007",
     message:
-      `Extract hasn't prepared ${domain} yet. Prepare it with POST /v1/extract/prepared-domains ` +
-      "(a few example URLs, a few minutes, no credits), then retry; or run with mode=autoparse.",
-    prepare: {
-      request: `POST ${prepareUrl}`,
-      headers: { "X-API-Key": "<your API key>", "Content-Type": "application/json" },
-      body: { domain, example_urls: [url] },
-      example_urls: "1 to 5 URLs of the pages you want extracted",
-      poll: `GET ${prepareUrl}/${domain} until status is ready (or failed), then call extract again`,
-    },
+      `Extract hasn't prepared ${domain} yet. Call prepare_domain with domain "${domain}" and 1 to 5 example URLs ` +
+      "(a few minutes, no credits), then retry once prepared_domain_status says ready; or run with mode=autoparse.",
+    next_tool: { name: "prepare_domain", arguments: { domain, example_urls: [url] } },
+    then: `Call prepared_domain_status with domain "${domain}" about every 30 seconds until status is ready, then call extract again.`,
     status,
     detail: body.slice(0, 500),
   });
@@ -338,9 +325,10 @@ page body. Set include_html to also get the page HTML.
 Modes:
 - auto (default): extract=auto, site-tailored Extract (currently free,
   billing may apply later). Works on any prepared domain, with any API key.
-  On a domain not prepared yet it returns error REQS007 with the next step:
-  prepare it with POST /v1/extract/prepared-domains (a few example URLs, a few
-  minutes, no credits), then call extract again.
+  On a domain not prepared yet it returns error REQS007. Then call
+  prepare_domain with the domain and 1 to 5 example URLs (a few minutes, no
+  credits), poll prepared_domain_status until it says ready, and call extract
+  again.
 - autoparse: deprecated general-purpose structured JSON on any domain; use only
   when asked for
 - css: css_extractor with an explicit selector map

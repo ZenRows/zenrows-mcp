@@ -80,8 +80,8 @@ test("runExtract falls back to autoparse on AUTH010 only when fallback_autoparse
 });
 
 const PREPARE_MESSAGE =
-  "Extract hasn't prepared example.com yet. Prepare it with POST /v1/extract/prepared-domains " +
-  "(a few example URLs, a few minutes, no credits), then retry; or run with mode=autoparse.";
+  'Extract hasn\'t prepared example.com yet. Call prepare_domain with domain "example.com" and 1 to 5 example URLs ' +
+  "(a few minutes, no credits), then retry once prepared_domain_status says ready; or run with mode=autoparse.";
 
 test("runExtract reports REQS007 by default with the prepare step, in one call", async () => {
   const calls: string[] = [];
@@ -97,13 +97,16 @@ test("runExtract reports REQS007 by default with the prepare step, in one call",
   const body = JSON.parse(outcome.errorText) as {
     code: string;
     message: string;
-    prepare: { request: string; body: { domain: string; example_urls: string[] }; poll: string };
+    next_tool: { name: string; arguments: { domain: string; example_urls: string[] } };
+    then: string;
   };
   assert.equal(body.code, "REQS007");
   assert.equal(body.message, PREPARE_MESSAGE);
-  assert.equal(body.prepare.request, "POST https://api.zenrows.com/v1/extract/prepared-domains");
-  assert.deepEqual(body.prepare.body, { domain: "example.com", example_urls: ["https://www.example.com/item/1"] });
-  assert.match(body.prepare.poll, /^GET https:\/\/api\.zenrows\.com\/v1\/extract\/prepared-domains\/example\.com /);
+  assert.deepEqual(body.next_tool, {
+    name: "prepare_domain",
+    arguments: { domain: "example.com", example_urls: ["https://www.example.com/item/1"] },
+  });
+  assert.match(body.then, /prepared_domain_status/);
 });
 
 test("runExtract reports legacy AUTH010 by default like REQS007, in one call", async () => {

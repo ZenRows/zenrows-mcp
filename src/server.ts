@@ -8,6 +8,7 @@ import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
 import { registerCrawlTools } from "./tools/crawl.js";
 import { registerExtractTool } from "./tools/extract.js";
+import { registerPrepareTools } from "./tools/prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -369,6 +370,7 @@ Examples:
   );
 
   registerExtractTool(server, apiKey, getClientName);
+  registerPrepareTools(server, apiKey);
   registerBatchTools(server, apiKey);
   registerCrawlTools(server, apiKey, { hosted: options.hosted });
   registerAccountTools(server, apiKey);
