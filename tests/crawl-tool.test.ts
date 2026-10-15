@@ -382,6 +382,12 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
   }
 });
 
+// What the server says when credits end a crawl, as error.detail.
+const creditStopDetail: Record<string, string> = {
+  insufficient_credits: "The crawl stopped because your account has no credits left.",
+  api_key_cap_reached: "The crawl stopped because your API key reached one of its credit caps.",
+};
+
 test("a crawl the credits ended comes back ok: false with the code a 402 create gets, stopped or failed", async () => {
   const { handlers } = register();
   const cases = [
@@ -403,7 +409,7 @@ test("a crawl the credits ended comes back ok: false with the code a 402 create 
   ];
   for (const k of cases) {
     const label = `${k.status} ${k.server}`;
-    const ended = { ...crawl(k.status), error: { code: k.server, detail: "Batch stopped the crawl." } };
+    const ended = { ...crawl(k.status), error: { code: k.server, detail: creditStopDetail[k.server] } };
     const out = await withFetch(
       () => jsonResponse({ ...ended, results: [], next_cursor: null }),
       () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
@@ -414,12 +420,8 @@ test("a crawl the credits ended comes back ok: false with the code a 402 create 
     assert.equal(body.crawl_id, "c_1", label);
     assert.equal(body.error.code, k.code, label);
     assert.equal(body.error.server_code, k.server, label);
-    assert.equal(body.error.detail, "Batch stopped the crawl.", label);
-    assert.match(
-      body.error.message,
-      new RegExp(`Crawl c_1 ${k.status} \\(${k.server}\\): Batch stopped the crawl\\.`),
-      label
-    );
+    assert.equal(body.error.detail, creditStopDetail[k.server], label);
+    assert.ok(body.error.message.includes(`Crawl c_1 ${k.status} (${k.server}): ${creditStopDetail[k.server]}`), label);
     assert.match(body.error.message, k.advice, label);
   }
 });
