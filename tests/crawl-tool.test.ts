@@ -382,6 +382,23 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
   }
 });
 
+test("a crawl stopped on credits comes back ok: false with its error code", async () => {
+  const { handlers } = register();
+  for (const code of ["insufficient_credits", "api_key_cap_reached"]) {
+    const stopped = { ...crawl("stopped"), error: { code, detail: "Batch stopped the crawl." } };
+    const out = await withFetch(
+      () => jsonResponse({ ...stopped, results: [], next_cursor: null }),
+      () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+    );
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, false, code);
+    assert.equal(body.status, "stopped");
+    assert.equal(body.error.code, "CRAWL_FAILED");
+    assert.equal(body.error.server_code, code);
+    assert.match(body.error.message, /stopped/);
+  }
+});
+
 test("a crawl that did not fail stays ok: true with no error", async () => {
   const { handlers } = register();
   const out = await withFetch(
