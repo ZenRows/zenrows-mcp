@@ -497,7 +497,7 @@ if (HAS_KEY) {
 await liveCheck(
   "20",
   "Results after stop",
-  "crawl_results on a crawl stopped with pages in flight: partial false, no note to call again, and no URL lost",
+  "crawl_results on a crawl stopped with pages in flight: no URL lost; partial follows next_cursor, and while it is set a note says to call again",
   async () => {
     if (!B || stopInfo?.error) return { status: FAIL, actual: `setup failed: ${stopInfo?.error}` };
     if (stopInfo.status !== "stopped") {
@@ -517,7 +517,7 @@ await liveCheck(
     const urls = (rows) => JSON.stringify((rows ?? []).map((x) => x.url).sort());
     const same = urls(d.results) === urls(later);
     const pending = (d.results ?? []).filter((x) => x.content_status === "pending").length;
-    const ok = !now.isError && d.partial === false && !d.note && same;
+    const ok = !now.isError && same && d.partial === (d.next_cursor != null) && (!d.partial || Boolean(d.note));
     return {
       status: passIf(ok),
       actual: `stopped with ${stopInfo.items} kept; first read: ${d.count} URLs (${pending} pending), partial ${d.partial}, next_cursor ${d.next_cursor === null ? "null" : "set"}, note: ${d.note ?? "none"}; then ${settledNote}: ${later.length} URLs, same set ${same}`,
@@ -669,7 +669,7 @@ await liveCheck("14", "Gated option", "output_format json is refused: by the inp
   return {
     status: passIf(bySchema || byApi),
     actual: bySchema
-      ? `refused before the API: the input schema takes "html" only (${H.trim(text, 200)})`
+      ? `refused before the API: the input schema takes "html" or "markdown" (${H.trim(text, 200)})`
       : H.trim(show(r), 300),
   };
 });
@@ -685,8 +685,8 @@ await liveCheck(
     ledger(r.data.crawl_id, "output_format markdown");
     await call(S, "crawl_stop", { crawl_id: r.data.crawl_id });
     return {
-      status: passIf(r.data.output_format === "markdown"),
-      actual: `${r.data.crawl_id}: output_format ${r.data.output_format}`,
+      status: passIf(r.data.crawl?.output_format === "markdown"),
+      actual: `${r.data.crawl_id}: output_format ${r.data.crawl?.output_format}`,
     };
   },
 );
@@ -698,7 +698,7 @@ await liveCheck(
     const given = await create({ ...base, max_items: 1, max_pages: 1, discovery: ["links"] });
     const leftOut = await create({ ...base, max_items: 1, max_pages: 1 });
     for (const c of [given, leftOut]) {
-      if (c?.crawl_id) await call(S, "crawl_stop", { crawl_id: c.crawl_id });
+      if (c?.data?.crawl_id) await call(S, "crawl_stop", { crawl_id: c.data.crawl_id });
     }
     const refused = await call(S, "crawl_create", { ...base, discovery: ["pagination"] });
     if (!refused.isError && refused.data?.crawl_id) {
@@ -706,10 +706,12 @@ await liveCheck(
       await call(S, "crawl_stop", { crawl_id: refused.data.crawl_id });
     }
     const one = JSON.stringify(["links"]);
-    const ok = JSON.stringify(given?.discovery) === one && JSON.stringify(leftOut?.discovery) === one && refused.isError;
+    const asked = given?.data?.crawl?.discovery;
+    const omitted = leftOut?.data?.crawl?.discovery;
+    const ok = JSON.stringify(asked) === one && JSON.stringify(omitted) === one && refused.isError;
     return {
       status: passIf(ok),
-      actual: JSON.stringify({ given: given?.discovery, leftOut: leftOut?.discovery, paginationRefused: refused.isError }),
+      actual: JSON.stringify({ given: asked, leftOut: omitted, paginationRefused: refused.isError }),
     };
   },
 );
