@@ -33,19 +33,20 @@ export function zrErrorCode(body: string): string | undefined {
 }
 
 /**
- * True when the result carries no usable value: null, "", [], {}, or an object whose
- * every field is itself empty (e.g. `{ listings: [] }` from a page that didn't load).
+ * True when the result carries no usable value: null, "", or an array / object whose
+ * every value is itself empty (e.g. `{ listings: [{ title: null }] }` from a page that
+ * didn't load). Numbers and booleans are values, so 0 and false count as data.
  */
 export function isEmptyData(data: unknown): boolean {
   if (data === null || data === undefined) return true;
-  if (Array.isArray(data)) return data.length === 0;
+  if (Array.isArray(data)) return data.every(isEmptyData);
   if (typeof data === "object") return Object.values(data as object).every(isEmptyData);
   if (typeof data === "string") return data.trim() === "";
   return false;
 }
 
-/** Errors on extract=auto that the autoparse fallback can recover from. */
-function isExtractUnavailable(status: number, body: string): boolean {
+/** Extract has not prepared the domain yet: REQS007, or the legacy AUTH010. */
+function isDomainNotPrepared(status: number, body: string): boolean {
   const code = zrErrorCode(body);
   // REQS007: domain not prepared for Extract yet. AUTH010: legacy domain-not-enabled code.
   return (status === 402 && code === "AUTH010") || (status === 403 && code === "REQS007");
@@ -64,6 +65,39 @@ const NO_DATA_MESSAGE =
   "Extract found no data on this page (not charged). Check that the page rendered fully: " +
   "set js_render with wait_for, or premium_proxy on protected sites.";
 
+/** The URL's host without a leading `www.`, the domain a caller prepares. */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * The tool error for a domain Extract has not prepared yet. It names the next step,
+ * because agents copy it: the prepare request, its body and how to poll it.
+ */
+export function domainNotPreparedError(url: string, status: number, body: string): string {
+  const domain = domainOf(url);
+  const prepareUrl = `${ZENROWS_API_URL}extract/prepared-domains`;
+  return JSON.stringify({
+    code: zrErrorCode(body) ?? "REQS007",
+    message:
+      `Extract hasn't prepared ${domain} yet. Prepare it with POST /v1/extract/prepared-domains ` +
+      "(a few example URLs, a few minutes, no credits), then retry; or run with mode=autoparse.",
+    prepare: {
+      request: `POST ${prepareUrl}`,
+      headers: { "X-API-Key": "<your API key>", "Content-Type": "application/json" },
+      body: { domain, example_urls: [url] },
+      example_urls: "1 to 5 URLs of the pages you want extracted",
+      poll: `GET ${prepareUrl}/${domain} until status is ready (or failed), then call extract again`,
+    },
+    status,
+    detail: body.slice(0, 500),
+  });
+}
+
 export type ExtractMode = "auto" | "autoparse" | "css";
 
 export type ExtractStealthOpts = {
@@ -80,6 +114,7 @@ export type ExtractInput = ExtractStealthOpts & {
   url: string;
   mode?: ExtractMode;
   fallback_autoparse?: boolean;
+  include_html?: boolean;
 };
 
 export type ExtractSuccess = {
@@ -151,8 +186,10 @@ async function callZenrows(
 }
 
 /**
- * Core extract logic (testable). When extract=auto isn't available for the domain
- * (AUTH010 or REQS007), retries once with autoparse unless fallback_autoparse is false.
+ * Core extract logic (testable). When Extract has not prepared the domain yet
+ * (REQS007, or the legacy AUTH010), returns an error naming the prepare step. It
+ * retries once with the deprecated autoparse only when fallback_autoparse is true.
+ * The page HTML is returned only when include_html is true.
  */
 export async function runExtract(
   apiKey: string,
@@ -193,8 +230,8 @@ export async function runExtract(
   if (
     !result.ok &&
     mode === "auto" &&
-    params.fallback_autoparse !== false &&
-    isExtractUnavailable(result.status, result.body)
+    params.fallback_autoparse === true &&
+    isDomainNotPrepared(result.status, result.body)
   ) {
     usedMode = "autoparse";
     fellBackToAutoparse = true;
@@ -216,6 +253,10 @@ export async function runExtract(
       noDataExtracted: true,
       message: NO_DATA_MESSAGE,
     };
+  }
+
+  if (!result.ok && usedMode === "auto" && isDomainNotPrepared(result.status, result.body)) {
+    return { ok: false, errorText: domainNotPreparedError(params.url, result.status, result.body) };
   }
 
   if (!result.ok) {
@@ -253,7 +294,8 @@ export async function runExtract(
     const envelope = parsed as { parsed?: unknown; html?: unknown };
     if ("parsed" in envelope) {
       data = envelope.parsed;
-      html = typeof envelope.html === "string" ? envelope.html : undefined;
+      // The page HTML is most of the response; return it only when asked for.
+      html = params.include_html === true && typeof envelope.html === "string" ? envelope.html : undefined;
     }
   }
 
@@ -291,12 +333,16 @@ export function registerExtractTool(server: McpServer, apiKey: string, getClient
       },
       description: `Extract structured data from a webpage via Zenrows.
 
-Returns JSON fields (products, articles, listings) rather than a full page body.
+Returns JSON fields (products, articles, listings) in "data" rather than a full
+page body. Set include_html to also get the page HTML.
 Modes:
 - auto (default): extract=auto, site-tailored Extract (currently free,
-  billing may apply later). Works on any domain Zenrows has prepared, with any
-  API key; falls back to autoparse when the domain isn't prepared yet (REQS007)
-- autoparse: general-purpose structured JSON on any domain
+  billing may apply later). Works on any prepared domain, with any API key.
+  On a domain not prepared yet it returns error REQS007 with the next step:
+  prepare it with POST /v1/extract/prepared-domains (a few example URLs, a few
+  minutes, no credits), then call extract again.
+- autoparse: deprecated general-purpose structured JSON on any domain; use only
+  when asked for
 - css: css_extractor with an explicit selector map
 
 Requests use automatic mode (mode=auto) by default: Zenrows enables JS rendering and
@@ -315,7 +361,9 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .enum(["auto", "autoparse", "css"])
           .nullish()
           .default("auto")
-          .describe("Extraction mode: auto (extract=auto, default), autoparse, or css (requires css_extractor)"),
+          .describe(
+            "Extraction mode: auto (extract=auto, default), css (requires css_extractor), or the deprecated autoparse"
+          ),
         css_extractor: z
           .string()
           .nullish()
@@ -363,9 +411,17 @@ Full-page markdown, HTML and screenshots come from scrape.`,
         fallback_autoparse: z
           .boolean()
           .nullish()
-          .default(true)
+          .default(false)
           .describe(
-            "When mode=auto and the domain isn't prepared for Extract yet (REQS007, or the legacy AUTH010), retry once with autoparse (default true)"
+            "Deprecated. When mode=auto and the domain isn't prepared yet (REQS007, or the legacy AUTH010), " +
+              "retry once with autoparse instead of returning the error. Default false: prepare the domain instead."
+          ),
+        include_html: z
+          .boolean()
+          .nullish()
+          .default(false)
+          .describe(
+            "mode=auto only: also return the full page HTML. Default false; the HTML is most of the response size."
           ),
       },
     },

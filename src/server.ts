@@ -163,8 +163,8 @@ Examples:
           .boolean()
           .nullish()
           .describe(
-            "Automatically extract structured data from the page into JSON. " +
-              "Best for product pages, articles, and listings."
+            "Deprecated: general-purpose structured JSON from the page. " +
+              "Prefer the extract tool (extract=auto on a prepared domain, or css_extractor)."
           ),
 
         css_extractor: z

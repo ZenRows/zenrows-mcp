@@ -49,7 +49,7 @@ test("zrErrorCode reads code field and AUTH from error string", () => {
   assert.equal(zrErrorCode(JSON.stringify({ error: "nope (AUTH004)" })), "AUTH004");
 });
 
-test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => {
+test("runExtract falls back to autoparse on AUTH010 only when fallback_autoparse is true", async () => {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -66,7 +66,7 @@ test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => 
     });
   }) as typeof fetch;
 
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
 
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
@@ -77,6 +77,49 @@ test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => 
   assert.match(calls[0]!, /extract=auto/);
   assert.match(calls[1]!, /autoparse=true/);
   assert.doesNotMatch(calls[1]!, /extract=auto/);
+});
+
+const PREPARE_MESSAGE =
+  "Extract hasn't prepared example.com yet. Prepare it with POST /v1/extract/prepared-domains " +
+  "(a few example URLs, a few minutes, no credits), then retry; or run with mode=autoparse.";
+
+test("runExtract reports REQS007 by default with the prepare step, in one call", async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ code: "REQS007", detail: "Extract has not been prepared" }), { status: 403 });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://www.example.com/item/1" }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls.length, 1, "REQS007 must not be retried with autoparse");
+  const body = JSON.parse(outcome.errorText) as {
+    code: string;
+    message: string;
+    prepare: { request: string; body: { domain: string; example_urls: string[] }; poll: string };
+  };
+  assert.equal(body.code, "REQS007");
+  assert.equal(body.message, PREPARE_MESSAGE);
+  assert.equal(body.prepare.request, "POST https://api.zenrows.com/v1/extract/prepared-domains");
+  assert.deepEqual(body.prepare.body, { domain: "example.com", example_urls: ["https://www.example.com/item/1"] });
+  assert.match(body.prepare.poll, /^GET https:\/\/api\.zenrows\.com\/v1\/extract\/prepared-domains\/example\.com /);
+});
+
+test("runExtract reports legacy AUTH010 by default like REQS007, in one call", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls, 1);
+  const body = JSON.parse(outcome.errorText) as { code: string; message: string };
+  assert.equal(body.code, "AUTH010");
+  assert.equal(body.message, PREPARE_MESSAGE);
 });
 
 test("runExtract does not fall back when fallback_autoparse is false", async () => {
@@ -91,9 +134,9 @@ test("runExtract does not fall back when fallback_autoparse is false", async () 
   assert.equal(outcome.ok, false);
   if (outcome.ok) return;
   assert.equal(calls, 1);
-  const body = JSON.parse(outcome.errorText) as { code: string; mode: string };
+  const body = JSON.parse(outcome.errorText) as { code: string; message: string };
   assert.equal(body.code, "AUTH010");
-  assert.equal(body.mode, "auto");
+  assert.equal(body.message, PREPARE_MESSAGE);
 });
 
 test("runExtract does not fall back on AUTH004", async () => {
@@ -125,7 +168,7 @@ test("runExtract surfaces autoparse failure after AUTH010 fallback", async () =>
     });
   }) as typeof fetch;
 
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
   assert.equal(outcome.ok, false);
   if (outcome.ok) return;
   const body = JSON.parse(outcome.errorText) as { code: string; mode: string };
@@ -145,6 +188,17 @@ test("runExtract unwraps extract=auto {parsed,html} envelope", async () => {
   if (!outcome.ok) return;
   assert.equal(outcome.mode, "auto");
   assert.equal(outcome.fellBackToAutoparse, false);
+  assert.deepEqual(outcome.data, { title: "T" });
+  assert.equal(outcome.html, undefined, "html is returned only with include_html");
+});
+
+test("runExtract returns the page html when include_html is true", async () => {
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify({ parsed: { title: "T" }, html: "<h1>T</h1>" }), { status: 200 })) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com", include_html: true }, { fetchImpl });
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
   assert.deepEqual(outcome.data, { title: "T" });
   assert.equal(outcome.html, "<h1>T</h1>");
 });
@@ -222,7 +276,7 @@ test("buildExtractParams: premium_proxy alone overrides Adaptive Stealth Mode", 
   assert.equal(sp.get("premium_proxy"), "true");
 });
 
-test("runExtract falls back to autoparse on REQS007 (domain not prepared)", async () => {
+test("runExtract falls back to autoparse on REQS007 when fallback_autoparse is true", async () => {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -235,7 +289,7 @@ test("runExtract falls back to autoparse on REQS007 (domain not prepared)", asyn
     return new Response(JSON.stringify({ title: "fallback" }), { status: 200 });
   }) as typeof fetch;
 
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
   assert.equal(outcome.fellBackToAutoparse, true);
@@ -267,7 +321,7 @@ test("runExtract only falls back from mode=auto, not from autoparse or css", asy
     }) as typeof fetch;
     const outcome = await runExtract(
       "testkey",
-      { url: "https://example.com", mode, css_extractor: '{"t":"h1"}' },
+      { url: "https://example.com", mode, css_extractor: '{"t":"h1"}', fallback_autoparse: true },
       { fetchImpl }
     );
     assert.equal(outcome.ok, false, mode);
@@ -281,7 +335,7 @@ test("runExtract does not fall back on other 403s", async () => {
     n++;
     return new Response(JSON.stringify({ code: "REQS001", detail: "blocked by policy" }), { status: 403 });
   }) as typeof fetch;
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
   assert.equal(outcome.ok, false);
   assert.equal(n, 1);
 });
@@ -292,6 +346,8 @@ test("isEmptyData treats an object of empty fields as empty", () => {
   assert.equal(isEmptyData({ listings: [], total: 0 }), false);
   assert.equal(isEmptyData({ title: "x" }), false);
   assert.equal(isEmptyData({ flag: false }), false);
+  assert.equal(isEmptyData({ listings: [{ title: null, price: "" }], author: { name: null } }), true);
+  assert.equal(isEmptyData({ listings: [{ title: null }, { title: "A" }] }), false);
 });
 
 test("buildExtractParams keeps wait=0 (a valid explicit value, not falsy-omitted)", () => {
@@ -454,7 +510,11 @@ test("registerExtractTool's handler formats a failure outcome as isError content
   assert.equal(payload.code, "INVALID_USAGE");
 });
 
-const NO_DATA = JSON.stringify({ code: "no_data_extracted", detail: "Extract found no data on this page.", status: 422 });
+const NO_DATA = JSON.stringify({
+  code: "no_data_extracted",
+  detail: "Extract found no data on this page.",
+  status: 422,
+});
 
 test("runExtract reports 422 no_data_extracted as an empty result, in one call, without fallback", async () => {
   const urls: string[] = [];
