@@ -171,7 +171,7 @@ When to use options:
     "browser_reload",
     {
       annotations: { title: "Reload Page", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: "Reload the current page.",
+      description: "Reload the current page of a browser session.",
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
@@ -338,7 +338,7 @@ When to use options:
     "browser_uncheck",
     {
       annotations: { title: "Uncheck Checkbox", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: "Uncheck a checkbox.",
+      description: "Uncheck a checkbox, found by CSS selector, in a browser session.",
       inputSchema: {
         session_id: sessionId,
         selector: z.string().describe("CSS selector of the checkbox element"),
