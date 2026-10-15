@@ -141,3 +141,28 @@ test("a per-key credit cap is not a quota/plan error and gets the cap guidance, 
   assert.match(batchOut, /reached one of its credit caps/);
   assert.doesNotMatch(batchOut, /Claim your Free account/);
 });
+
+test("a Batch job-count limit (429) gets no claim nudge; Batch out of credits (402) does", async () => {
+  writeUnclaimed("https://app.zenrows.com/claim/batch");
+  const { BatchError, createJob } = await import("../src/batch-api.ts");
+  const problem = (status: number) =>
+    (async () => new Response(JSON.stringify({ code: "quota_exceeded", detail: "limit" }), { status })) as typeof fetch;
+  const caught = async (status: number) => {
+    try {
+      await createJob({ tasks: [] }, { apiKey: "k", fetchImpl: problem(status) });
+    } catch (e) {
+      return e as InstanceType<typeof BatchError>;
+    }
+    throw new Error("expected an error");
+  };
+  for (const [status, nudged] of [
+    [429, false],
+    [402, true],
+  ] as const) {
+    const e = await caught(status);
+    assert.equal(e.code, "BATCH_QUOTA_EXCEEDED");
+    const text = JSON.stringify(e.toJSON());
+    const out = appendClaimHint(text, { status: e.status, code: e.code, message: e.message, body: text });
+    assert.equal(/claim\/batch/.test(out), nudged, `status ${status}`);
+  }
+});

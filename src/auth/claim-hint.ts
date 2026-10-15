@@ -69,6 +69,9 @@ export function isQuotaOrPlanError(
   const code = extractCode(opts.body, opts.code);
   if (code && SKIP_CODES.has(code)) return false;
 
+  // Batch's 429 shares BATCH_QUOTA_EXCEEDED with its 402, but it is a job-count limit that
+  // credits do not fix, so it gets no claim nudge.
+  if (opts.status === 429 && code === "BATCH_QUOTA_EXCEEDED") return false;
   if (opts.status === 402) return true;
   if (code === "BATCH_QUOTA_EXCEEDED") return true;
 
