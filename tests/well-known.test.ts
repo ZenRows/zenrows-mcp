@@ -60,11 +60,12 @@ test("each protected resource document names the resource its URL was built from
 });
 
 test("the key is read from a Bearer header and ?apikey=, never ?access_token=", async () => {
-  const initialize = JSON.stringify({
+  // tools/call, because discovery methods such as initialize are answered without a key.
+  const toolCall = JSON.stringify({
     jsonrpc: "2.0",
     id: 1,
-    method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+    method: "tools/call",
+    params: { name: "no_such_tool", arguments: {} },
   });
   const call = (headers: Record<string, string>, rawQueryString?: string) =>
     handler({
@@ -72,7 +73,7 @@ test("the key is read from a Bearer header and ?apikey=, never ?access_token=", 
       rawPath: "/mcp",
       rawQueryString,
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-      body: initialize,
+      body: toolCall,
     });
 
   assert.equal((await call({ authorization: "Bearer test-key" })).statusCode, 200);
@@ -103,7 +104,7 @@ test("the challenge on an unauthenticated call names the scope", async () => {
     requestContext: { http: { method: "POST" } },
     rawPath: "/mcp",
     headers: {},
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "scrape", arguments: {} } }),
   });
 
   assert.equal(response.statusCode, 401);
