@@ -744,22 +744,26 @@ await check(
   },
 );
 
-// ---------- 19-21: a failed crawl, results after a stop, the documented defaults ----------
+// ---------- 19-21: a crawl that matches nothing, results after a stop, the documented defaults ----------
 await liveCheck(
   "19",
-  "Failed crawl",
-  "a crawl that keeps nothing ends failed (no_items_found); crawl_wait says ok: false with the crawl's error",
+  "No match",
+  "a crawl whose pattern matches nothing ends completed with 0 results and no error; crawl_wait says ok: true",
   async () => {
     const r = await create({ url: CRAWL_URL, depth: 1, include_patterns: [H.NO_MATCH] });
     F = r.data;
     if (r.isError) return { status: FAIL, actual: show(r) };
     const w = await waitEnd(F.crawl_id);
     const d = w.data ?? {};
-    const failed = d.status === "failed" && d.crawl?.error?.code === "no_items_found";
-    const ok = failed && d.ok === false && d.crawl_id === F.crawl_id;
+    const empty =
+      d.status === "completed" &&
+      d.crawl?.coverage?.items_found === 0 &&
+      d.crawl?.error === undefined &&
+      d.error === undefined;
+    const ok = empty && d.ok === true && d.crawl_id === F.crawl_id;
     return {
       status: passIf(ok),
-      actual: `${F.crawl_id}: status ${d.status}, ok ${d.ok}, error ${JSON.stringify(d.crawl?.error ?? d.error)}`,
+      actual: `${F.crawl_id}: status ${d.status}, ok ${d.ok}, items ${d.crawl?.coverage?.items_found}, error ${JSON.stringify(d.crawl?.error ?? d.error ?? null)}`,
       evidence: show(w),
     };
   },

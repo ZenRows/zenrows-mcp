@@ -22,7 +22,10 @@ export interface CrawlCoverage {
   items_found: number;
 }
 
-/** status: running | completed | stopped | failed. New values may appear; anything but running is terminal. */
+/**
+ * status: running | completed | stopped | failed. New values may appear; anything but running is terminal.
+ * A completed crawl can hold no results and no error: its pages held nothing new to follow.
+ */
 export interface Crawl {
   crawl_id: string;
   status: string;
@@ -34,6 +37,11 @@ export interface Crawl {
   coverage: CrawlCoverage;
   created_at: string;
   stop_reason?: string;
+  /**
+   * Set when the crawl failed or credits stopped it. `seed_unreachable`: the start URL could not be
+   * fetched or returned an empty page. `no_items_found`: the crawl read the start page but found no
+   * data it could use.
+   */
   error?: { code: string; detail: string };
   finished_at?: string;
   [k: string]: unknown;

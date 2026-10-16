@@ -107,6 +107,34 @@ test("crawl_create's description says a crawl whose patterns match nothing still
   assert.match(c.description, /match\s+nothing still costs that one scrape/);
 });
 
+test("crawl's descriptions say 0 results with no error is a completed crawl, and to check the patterns", () => {
+  const { configs } = register();
+  const c = configs.crawl_create;
+  const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
+  assert.match(c.description, /ends completed with no results\s+and no error/);
+  assert.match(c.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_get.description, /completed with no results and no error/);
+  assert.match(configs.crawl_get.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_wait.description, /completed with no results and no error finished; it is not a failure/);
+  for (const text of [
+    c.description,
+    configs.crawl_get.description,
+    String(shape.max_pages.description),
+    String(shape.include_patterns.description),
+    String(shape.exclude_patterns.description),
+  ]) {
+    assert.doesNotMatch(text, /not the pages it opens|opened only to reach|still opens|may still open/);
+  }
+});
+
+test("crawl_get's description gives no_items_found and seed_unreachable their meanings", () => {
+  const d = register().configs.crawl_get.description;
+  assert.match(d, /seed_unreachable means the start URL could not be fetched or returned an empty page/);
+  assert.match(d, /no_items_found means the crawl read the start page but found no data it could use/);
+  assert.match(d, /start from a listing or product page/);
+  assert.doesNotMatch(d, /loosen them|Extract/);
+});
+
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
   const { handlers } = register();
   const out = await withFetch(
@@ -379,7 +407,14 @@ test("crawl_get carries crawl_id on an error", async () => {
 
 test("a crawl that ended failed comes back ok: false with its error, from crawl_wait and crawl_get", async () => {
   const { handlers } = register();
-  const failed = { ...crawl("failed"), error: { code: "no_items_found", detail: "No link matched the URL patterns." } };
+  const failed = {
+    ...crawl("failed"),
+    error: {
+      code: "no_items_found",
+      detail:
+        "The crawl read the start page but found no data it could use, so it had nothing to follow. Start from a listing or product page.",
+    },
+  };
   for (const call of [
     () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
     () => handlers.crawl_get({ crawl_id: "c_1" }),
@@ -391,7 +426,27 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     assert.equal(body.crawl_id, "c_1");
     assert.equal(body.error.code, "CRAWL_FAILED");
     assert.equal(body.error.server_code, "no_items_found");
-    assert.match(body.error.message, /No link matched/);
+    assert.match(body.error.message, /found no data it could use/);
+  }
+});
+
+test("a completed crawl with patterns and 0 results comes back ok: true with no error", async () => {
+  const { handlers } = register();
+  const empty = {
+    ...crawl("completed"),
+    include_patterns: ["/product/"],
+    coverage: { pages_fetched: 1, pages_failed: 0, items_found: 0 },
+  };
+  for (const call of [
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
+    () => handlers.crawl_get({ crawl_id: "c_1" }),
+  ]) {
+    const out = await withFetch(() => jsonResponse({ ...empty, results: [], next_cursor: null }), call);
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "completed");
+    assert.equal(body.crawl.coverage.items_found, 0);
+    assert.equal(body.error, undefined);
   }
 });
 
