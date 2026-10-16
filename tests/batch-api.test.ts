@@ -93,8 +93,12 @@ test("createJob keeps AUTH_INVALID for 401 subscription_inactive but points to B
       e instanceof BatchError &&
       e.code === "AUTH_INVALID" &&
       e.status === 401 &&
-      /app\.zenrows\.com\/billing/.test(e.message) &&
-      /subscription_inactive/.test(e.detail ?? "")
+      e.message ===
+        "Zenrows refused the Batch API request because the subscription is not active (past due, unpaid, incomplete or paused). The API key is valid: fix the subscription in Billing at https://app.zenrows.com/billing, or in Azure Marketplace if you subscribed there, then retry." &&
+      e.detail === "HTTP 401 (subscription_inactive) for POST /jobs: Subscription is not active." &&
+      e.serverCode === "subscription_inactive" &&
+      e.reason === undefined &&
+      e.toJSON().server_code === "subscription_inactive"
   );
 });
 

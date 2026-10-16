@@ -283,7 +283,9 @@ Returns job_id + latest_run.status/stats. batch_status and batch_wait report pro
 Errors: BATCH_ACCESS_DENIED (Batch is not enabled for this account or API key),
 BATCH_QUOTA_EXCEEDED (402 with reason insufficient_credits, or 429 with reason
 too_many_jobs: 3 active jobs by default), BATCH_KEY_CAP_REACHED (402, this key's
-credit cap), BATCH_FAILED (any other HTTP error; server_code carries the Batch
+credit cap), AUTH_INVALID (401: a rejected key, or server_code
+subscription_inactive when the subscription needs fixing in Billing),
+BATCH_FAILED (any other HTTP error; server_code carries the Batch
 API's own code when it sent one), and BACKEND_UNAVAILABLE (the API could not be
 reached, after retries).
 

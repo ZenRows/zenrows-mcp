@@ -158,7 +158,7 @@ Errors carry a `code`. `reason` says which case a shared code stands for, and `s
 | `BATCH_KEY_CAP_REACHED` | 402 (`reason` `api_key_cap_reached`): this API key reached one of its credit caps; the account's other keys still work. |
 | `BATCH_ACCESS_DENIED` | 403: Batch is not enabled for this account or API key. |
 | `BATCH_NOT_FOUND` | 404: no such job, run or task for this account. |
-| `AUTH_INVALID` | 401: the API key was rejected. |
+| `AUTH_INVALID` | 401: the API key was rejected, or, with `server_code` `subscription_inactive`, the key is valid but the subscription is not active: fix it in Billing. |
 | `BATCH_FAILED` | Any other HTTP error; see `server_code` and `detail`. |
 | `BACKEND_UNAVAILABLE` | No response: a network error or timeout, after retries. |
 

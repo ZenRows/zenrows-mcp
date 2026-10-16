@@ -377,6 +377,28 @@ test("batch_cancel on a completed or failed run reports run_not_stoppable (409)"
   assert.equal(out.server_code, "run_not_stoppable");
 });
 
+test("batch_status on a 401 subscription_inactive keeps AUTH_INVALID, points to Billing, and adds server_code", async () => {
+  const { result } = await withFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          title: "Subscription not active (subscription_inactive)",
+          status: 401,
+          code: "subscription_inactive",
+          detail: "Subscription is not active.",
+        }),
+        { status: 401, headers: { "content-type": "application/problem+json" } }
+      ),
+    () => captureTool("batch_status")({ job_id: "j1" })
+  );
+  assert.equal(result.isError, true);
+  const out = JSON.parse(result.content[0]!.text);
+  assert.equal(out.code, "AUTH_INVALID");
+  assert.equal(out.status, 401);
+  assert.equal(out.server_code, "subscription_inactive");
+  assert.match(out.message, /app\.zenrows\.com\/billing/);
+});
+
 test("runOutcome never reports a run that stopped or completed while paused as paused", () => {
   for (const status of ["stopped", "completed", "deleted"]) {
     const out = runOutcome("j1", { status, pause_state: "paused", stats: {} as never });
