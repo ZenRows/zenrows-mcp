@@ -62,6 +62,42 @@ test("createJob maps 401 to AUTH_INVALID", async () => {
   );
 });
 
+test("createJob keeps the bad-key message for a 401 unauthenticated problem", async () => {
+  const body = {
+    title: "Unauthenticated (unauthenticated)",
+    status: 401,
+    code: "unauthenticated",
+    detail: "Invalid API key.",
+  };
+  const fetchImpl = (async () => new Response(JSON.stringify(body), { status: 401 })) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [{ url: "https://example.com" }] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) =>
+      e instanceof BatchError &&
+      e.code === "AUTH_INVALID" &&
+      e.message === "Zenrows rejected the API key for the Batch API."
+  );
+});
+
+test("createJob keeps AUTH_INVALID for 401 subscription_inactive but points to Billing", async () => {
+  const body = {
+    title: "Subscription not active (subscription_inactive)",
+    status: 401,
+    code: "subscription_inactive",
+    detail: "Subscription is not active.",
+  };
+  const fetchImpl = (async () => new Response(JSON.stringify(body), { status: 401 })) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [{ url: "https://example.com" }] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) =>
+      e instanceof BatchError &&
+      e.code === "AUTH_INVALID" &&
+      e.status === 401 &&
+      /app\.zenrows\.com\/billing/.test(e.message) &&
+      /subscription_inactive/.test(e.detail ?? "")
+  );
+});
+
 test("createJob maps 404 to BATCH_NOT_FOUND", async () => {
   const fetchImpl = (async () => new Response(JSON.stringify({ title: "not found" }), { status: 404 })) as typeof fetch;
   await assert.rejects(

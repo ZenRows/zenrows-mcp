@@ -266,6 +266,17 @@ function problemToError(status: number, body: string, method: string, path: stri
       "The Batch API rejected this request (access denied). Batch is not enabled for this account or API key. Check that the key is active and contact Zenrows support if this persists, or fan out with scrape/extract per URL."
     );
   }
+  if (status === 401 && serverCode === "subscription_inactive") {
+    // The key is valid; the subscription needs a billing action. Same
+    // AUTH_INVALID code as any 401 so clients that branch on it keep working.
+    return new BatchError({
+      code: "AUTH_INVALID",
+      message:
+        "Zenrows refused the Batch API request because the subscription is not active (past due, unpaid, incomplete or paused). The API key is valid: fix the subscription in Billing at https://app.zenrows.com/billing, or in Azure Marketplace if you subscribed there, then retry.",
+      status,
+      detail: cause,
+    });
+  }
   if (status === 401) {
     return make("AUTH_INVALID", "Zenrows rejected the API key for the Batch API.");
   }

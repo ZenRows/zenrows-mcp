@@ -19,6 +19,16 @@ const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
   (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
 
+// Sent in the initialize response; clients put it in the model's context, so it says
+// which tool to reach for first, not what every tool does.
+export const INSTRUCTIONS = [
+  "Zenrows returns the content of public web pages.",
+  "Start with scrape for one page's content, or extract for structured JSON fields.",
+  "For many URLs use batch_create; to discover the URLs behind a listing or section page, use crawl_create.",
+  "Use the browser_* tools only when a page needs clicks, typing or several steps: browser_navigate opens a session, and browser_close frees it when done.",
+  "Call account_usage (free) before a large job or after a 402.",
+].join(" ");
+
 export interface ScrapeParams {
   url: string;
   js_render?: boolean | null;
@@ -81,10 +91,13 @@ export interface ServerOptions {
 }
 
 export function createServer(apiKey: string, clientName?: string, options: ServerOptions = {}): McpServer {
-  const server = new McpServer({
-    name: "zenrows",
-    version: pkg.version,
-  });
+  const server = new McpServer(
+    {
+      name: "zenrows",
+      version: pkg.version,
+    },
+    { instructions: INSTRUCTIONS }
+  );
 
   // Resolve client name: prefer explicit value (HTTP stateless path),
   // fall back to MCP handshake (stdio/persistent connection path).
@@ -376,7 +389,14 @@ Examples:
   const BROWSER_URL = process.env.ZENROWS_BROWSER_URL ?? "https://mcp.zenrows.com";
   registerBrowserTools(server, apiKey, BROWSER_URL, getClientName);
 
-  // Always expose account resource; handler re-reads disk so ZENROWS_HOME is visible.
+  // The handler re-reads disk so ZENROWS_HOME is visible. The account file lives on the user's machine. A hosted server would read its own
+  // disk instead, which never holds the caller's account, so it does not offer this.
+  if (!options.hosted) registerAccountResource(server);
+
+  return server;
+}
+
+function registerAccountResource(server: McpServer) {
   server.registerResource(
     "zenrows-account",
     "zenrows://account",
@@ -412,6 +432,4 @@ Examples:
       };
     }
   );
-
-  return server;
 }
