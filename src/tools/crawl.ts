@@ -7,12 +7,14 @@ import { appendClaimHint } from "../auth/claim-hint.js";
 import { getZenrowsDir } from "../auth/ensure-key.js";
 import {
   Crawl,
+  CRAWL_CREDIT_CODES,
   CrawlError,
   CrawlResult,
   CrawlStop,
   contentIdOf,
   crawlDownloadUrl,
   createCrawl,
+  creditError,
   CreateCrawlBody,
   DEFAULT_LIMIT,
   DEFAULT_WAIT_SECONDS,
@@ -86,19 +88,26 @@ function resultsNote(status: string, ended: boolean, full: boolean): string {
 
 /**
  * The one output shape of crawl_create, crawl_get, crawl_wait and crawl_stop. A crawl that
- * ended `failed` answers ok: false with an error naming its code, as the CLI does, so an agent
- * that reads only `ok` does not take a failed crawl for a finished one.
+ * ended `failed`, or `stopped` with an error (the account ran out of credits or the API key hit
+ * a credit cap), answers ok: false with an error naming its code, as the CLI does, so an agent
+ * that reads only `ok` does not take it for a finished one. A crawl the credits ended gets the
+ * code and advice of a create refused with 402, stopped or (on older deployments) failed;
+ * any other error is CRAWL_FAILED.
  */
 function crawlOut(
   crawl: CrawlStop,
   more: { note?: string; results?: CrawlResult[]; next_cursor?: string | null; first_urls?: string[] } = {}
 ): { content: TextContent[] } {
-  const failed = crawl.status === "failed";
+  const creditStop = crawl.status === "stopped" && !!crawl.error;
+  const failed = crawl.status === "failed" || creditStop;
+  const serverCode = crawl.error?.code;
+  const credit = serverCode && CRAWL_CREDIT_CODES.has(serverCode) ? creditError(serverCode) : undefined;
+  const what = `Crawl ${crawl.crawl_id} ${creditStop ? "stopped" : "failed"}${serverCode ? ` (${serverCode})` : ""}: ${crawl.error?.detail ?? "no reason given"}`;
   const error = failed
     ? {
-        code: "CRAWL_FAILED",
-        message: `Crawl ${crawl.crawl_id} failed${crawl.error?.code ? ` (${crawl.error.code})` : ""}: ${crawl.error?.detail ?? "no reason given"}`,
-        server_code: crawl.error?.code,
+        code: credit?.code ?? "CRAWL_FAILED",
+        message: credit ? `${what.replace(/\.\s*$/, "")}. ${credit.cause}. ${credit.advice}` : what,
+        server_code: serverCode,
         detail: crawl.error?.detail,
       }
     : undefined;
@@ -249,7 +258,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
-completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
+completed with stop_reason max_items / max_pages means a limit ended it; stopped with stop_reason user means crawl_stop ended it; stopped with no stop_reason and error.code insufficient_credits or api_key_cap_reached means the account ran out of credits or the API key hit a credit cap (the URLs kept before that stay readable); failed carries error.code and error.detail. A failed crawl, and a stopped one with an error, answer ok: false: error.code is CRAWL_INSUFFICIENT_CREDITS or CRAWL_KEY_CAP_REACHED (the codes crawl_create gets on a 402) when credits ended it, failed or stopped, else CRAWL_FAILED; error.server_code is the crawl's error.code. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_get call, to continue from there"),
