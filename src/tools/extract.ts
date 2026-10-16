@@ -155,7 +155,6 @@ export type ExtractInput = ExtractStealthOpts & {
 export type ExtractSuccess = {
   ok: true;
   mode: ExtractMode;
-  fellBackToAutoparse: boolean;
   empty: boolean;
   data: unknown;
   html?: string;
@@ -163,6 +162,8 @@ export type ExtractSuccess = {
   /** Set when Extract answered 422 no_data_extracted; `empty` is true too. */
   noDataExtracted?: boolean;
   message?: string;
+  /** Set when the caller sent the deprecated fallback_autoparse: true. */
+  note?: string;
 };
 
 export type ExtractFailure = {
@@ -220,13 +221,46 @@ async function callZenrows(
   return { ok: response.ok, status: response.status, body: await response.text() };
 }
 
+/** The note a result carries when the caller sent fallback_autoparse: true. */
+export const FALLBACK_AUTOPARSE_NOTE =
+  "fallback_autoparse was ignored: it is deprecated and has no effect, because Extract no longer falls back to autoparse. " +
+  "On REQS007 with reason domain_not_prepared, prepare the domain with prepare_domain instead.";
+
 /**
- * Core extract logic (testable). When Extract has not prepared the domain yet
- * (REQS007, or the legacy AUTH010), returns an error naming the prepare step. It
- * retries once with the deprecated autoparse only when fallback_autoparse is true.
- * The page HTML is returned only when include_html is true.
+ * Core extract logic (testable). One request, never retried: when Extract refuses
+ * the page (REQS007, or the legacy AUTH010), returns an error naming the next step
+ * for its reason. fallback_autoparse is accepted and ignored; when it is true the
+ * result says so. The page HTML is returned only when include_html is true.
  */
 export async function runExtract(
+  apiKey: string,
+  params: ExtractInput,
+  options: {
+    getClientName?: () => string | undefined;
+    fetchImpl?: typeof fetch;
+  } = {}
+): Promise<ExtractSuccess | ExtractFailure> {
+  const outcome = await runExtractOnce(apiKey, params, options);
+  if (params.fallback_autoparse !== true) return outcome;
+  return outcome.ok
+    ? { ...outcome, note: FALLBACK_AUTOPARSE_NOTE }
+    : { ok: false, errorText: withNote(outcome.errorText) };
+}
+
+/** Adds the fallback_autoparse note to an error: as a `note` field when the error is a JSON object, else as a last line. */
+function withNote(errorText: string): string {
+  try {
+    const parsed: unknown = JSON.parse(errorText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...parsed, note: FALLBACK_AUTOPARSE_NOTE });
+    }
+  } catch {
+    // Not JSON: a plain-text error such as a network failure.
+  }
+  return `${errorText}\n${FALLBACK_AUTOPARSE_NOTE}`;
+}
+
+async function runExtractOnce(
   apiKey: string,
   params: ExtractInput,
   options: {
@@ -258,31 +292,17 @@ export async function runExtract(
     wait: params.wait,
   };
 
-  let usedMode: ExtractMode = mode;
-  let result = await callZenrows(apiKey, buildExtractParams(apiKey, params.url, mode, opts), getClientName, fetchImpl);
+  const result = await callZenrows(
+    apiKey,
+    buildExtractParams(apiKey, params.url, mode, opts),
+    getClientName,
+    fetchImpl
+  );
 
-  let fellBackToAutoparse = false;
-  if (
-    !result.ok &&
-    mode === "auto" &&
-    params.fallback_autoparse === true &&
-    isDomainNotPrepared(result.status, result.body)
-  ) {
-    usedMode = "autoparse";
-    fellBackToAutoparse = true;
-    result = await callZenrows(
-      apiKey,
-      buildExtractParams(apiKey, params.url, "autoparse", opts),
-      getClientName,
-      fetchImpl
-    );
-  }
-
-  if (usedMode === "auto" && isNoDataExtracted(result.status, result.body)) {
+  if (mode === "auto" && isNoDataExtracted(result.status, result.body)) {
     return {
       ok: true,
-      mode: usedMode,
-      fellBackToAutoparse,
+      mode,
       empty: true,
       data: null,
       noDataExtracted: true,
@@ -290,7 +310,7 @@ export async function runExtract(
     };
   }
 
-  if (!result.ok && usedMode === "auto" && isDomainNotPrepared(result.status, result.body)) {
+  if (!result.ok && mode === "auto" && isDomainNotPrepared(result.status, result.body)) {
     return { ok: false, errorText: domainNotPreparedError(params.url, result.status, result.body) };
   }
 
@@ -304,7 +324,7 @@ export async function runExtract(
               code: zrErrorCode(result.body) ?? "EXTRACT_FAILED",
               message: `Zenrows error ${result.status}`,
               detail: result.body.slice(0, 500),
-              mode: usedMode,
+              mode,
             }),
     };
   }
@@ -315,8 +335,7 @@ export async function runExtract(
   } catch {
     return {
       ok: true,
-      mode: usedMode,
-      fellBackToAutoparse,
+      mode,
       empty: true,
       data: null,
       raw: result.body,
@@ -325,7 +344,7 @@ export async function runExtract(
 
   let data: unknown = parsed;
   let html: string | undefined;
-  if (usedMode === "auto" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+  if (mode === "auto" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const envelope = parsed as { parsed?: unknown; html?: unknown };
     if ("parsed" in envelope) {
       data = envelope.parsed;
@@ -336,8 +355,7 @@ export async function runExtract(
 
   return {
     ok: true,
-    mode: usedMode,
-    fellBackToAutoparse,
+    mode,
     empty: isEmptyData(data),
     data,
     ...(html !== undefined ? { html } : {}),
@@ -452,10 +470,8 @@ Full-page markdown, HTML and screenshots come from scrape.`,
         fallback_autoparse: z
           .boolean()
           .nullish()
-          .default(false)
           .describe(
-            "Deprecated. When mode=auto and the domain isn't prepared yet (REQS007, or the legacy AUTH010), " +
-              "retry once with autoparse instead of returning the error. Default false: prepare the domain instead."
+            "Deprecated, has no effect: Extract no longer falls back to autoparse. Prepare the domain with prepare_domain instead."
           ),
         include_html: z
           .boolean()
@@ -472,12 +488,12 @@ Full-page markdown, HTML and screenshots come from scrape.`,
       return json({
         ok: true,
         mode: outcome.mode,
-        fellBackToAutoparse: outcome.fellBackToAutoparse,
         empty: outcome.empty,
         data: outcome.data,
         ...(outcome.html !== undefined ? { html: outcome.html } : {}),
         ...(outcome.raw !== undefined ? { raw: outcome.raw } : {}),
         ...(outcome.noDataExtracted ? { noDataExtracted: true, message: outcome.message } : {}),
+        ...(outcome.note !== undefined ? { note: outcome.note } : {}),
       });
     }
   );
