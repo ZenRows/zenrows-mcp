@@ -255,5 +255,38 @@ jobs:
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
+      # The registry can answer 5xx for a while, and a timed-out publish can
+      # still record the version. So each try first asks whether the registry
+      # already lists this version, and a failed try waits longer each time.
+      # Each try logs in again, so a login that expires during the waits
+      # does not fail every later try.
       - name: Publish server.json
-        run: ./mcp-publisher publish
+        run: |
+          NAME=$(jq -r '.name' server.json)
+          VERSION=$(jq -r '.version' server.json)
+          listed() {
+            curl -fsS --max-time 30 "https://registry.modelcontextprotocol.io/v0/servers?search=${NAME#*/}&limit=100" |
+              jq -e --arg n "$NAME" --arg v "$VERSION" \
+                '[.servers[] | (.server // .) | select(.name == $n and .version == $v)] | length > 0' >/dev/null
+          }
+          for i in 1 2 3 4 5; do
+            if listed; then
+              echo "The registry lists $NAME $VERSION"
+              exit 0
+            fi
+            if ./mcp-publisher login github-oidc; then
+              out=$(./mcp-publisher publish 2>&1) && { echo "$out"; exit 0; }
+              echo "$out"
+              # A duplicate means the registry already holds this version: an
+              # earlier publish recorded it, though the check above missed it.
+              if grep -q "cannot publish duplicate version" <<<"$out"; then
+                echo "The registry already holds $NAME $VERSION"
+                exit 0
+              fi
+            fi
+            echo "Publish try $i of 5 failed; next try in $((i * 30)) seconds"
+            sleep $((i * 30))
+          done
+          listed && exit 0
+          echo "::error::The registry does not list $NAME $VERSION after 5 tries"
+          exit 1
