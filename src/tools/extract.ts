@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
+import { fetchWithRetry, type RetryOptions } from "../retry.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
@@ -130,17 +131,22 @@ async function callZenrows(
   apiKey: string,
   searchParams: URLSearchParams,
   getClientName: () => string | undefined,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
+  retry: RetryOptions
 ): Promise<{ ok: boolean; status: number; body: string }> {
   let response: Response;
   try {
-    response = await fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
-      headers: {
-        "User-Agent": `zenrows/mcp ${pkg.version}`,
-        ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-        "x-mcp-tool": "extract",
-      },
-    });
+    response = await fetchWithRetry(
+      () =>
+        fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
+          headers: {
+            "User-Agent": `zenrows/mcp ${pkg.version}`,
+            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+            "x-mcp-tool": "extract",
+          },
+        }),
+      retry
+    );
   } catch (e) {
     return {
       ok: false,
@@ -161,10 +167,13 @@ export async function runExtract(
   options: {
     getClientName?: () => string | undefined;
     fetchImpl?: typeof fetch;
+    /** Retry policy for the API calls; tests inject sleep and randomness here. */
+    retry?: RetryOptions;
   } = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const getClientName = options.getClientName ?? (() => undefined);
   const fetchImpl = options.fetchImpl ?? fetch;
+  const retry = options.retry ?? {};
   const mode: ExtractMode = params.mode ?? "auto";
 
   if (mode === "css" && !params.css_extractor) {
@@ -188,7 +197,7 @@ export async function runExtract(
   };
 
   let usedMode: ExtractMode = mode;
-  let result = await callZenrows(apiKey, buildExtractParams(apiKey, params.url, mode, opts), getClientName, fetchImpl);
+  let result = await callZenrows(apiKey, buildExtractParams(apiKey, params.url, mode, opts), getClientName, fetchImpl, retry);
 
   let fellBackToAutoparse = false;
   if (
@@ -203,7 +212,8 @@ export async function runExtract(
       apiKey,
       buildExtractParams(apiKey, params.url, "autoparse", opts),
       getClientName,
-      fetchImpl
+      fetchImpl,
+      retry
     );
   }
 

@@ -5,6 +5,7 @@ import { appendClaimHint, claimLinkExpired, hasClaimHint, stripClaimHint } from 
 import { refreshClaimState, usableClaimUrl } from "./auth/claim-refresh.js";
 import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
 import { keyOf, type KeyRef } from "./auth/key-ref.js";
+import { fetchWithRetry } from "./retry.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
@@ -265,13 +266,15 @@ Examples:
 
       let response: Response;
       try {
-        response = await fetch(`${ZENROWS_API_URL}?${searchParams}`, {
-          headers: {
-            "User-Agent": `zenrows/mcp ${pkg.version}`,
-            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-            "x-mcp-tool": "scrape",
-          },
-        });
+        response = await fetchWithRetry(() =>
+          fetch(`${ZENROWS_API_URL}?${searchParams}`, {
+            headers: {
+              "User-Agent": `zenrows/mcp ${pkg.version}`,
+              ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+              "x-mcp-tool": "scrape",
+            },
+          })
+        );
       } catch (err) {
         return {
           content: [
