@@ -33,6 +33,9 @@ const pkg = require("../../package.json") as { version: string };
 type TextContent = { type: "text"; text: string };
 type ToolOut = { content: TextContent[]; isError?: true };
 
+const BINARY_NOTE =
+  "Binary result, not inlined. Download result_url within 2 hours; call batch_content again for a fresh one.";
+
 /** Default cap on batch_content's text, in characters; a page can run to megabytes. */
 export const DEFAULT_CONTENT_MAX_CHARS = 20_000;
 
@@ -678,7 +681,7 @@ Filter with status: all (default), successful, failed, or processing (not finish
     "batch_content",
     {
       annotations: { title: "Batch Task Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Read one Batch task's stored result, by job_id and task_id (from batch_results). A text result (HTML, Markdown, plain text, JSON) comes back inline, cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. A binary result (a PDF) is not inlined: the reply gives its result_url, presigned for 2 hours.
+      description: `Read one Batch task's stored result, by job_id and task_id (from batch_results). A text result (HTML, Markdown, plain text, JSON) comes back inline, cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. A binary result (a PDF) is not inlined: the reply gives its result_url, presigned for 2 hours. Finding that URL reads the run's results; on a large run one call may run out of time first and answer with lookup_cursor: call batch_content again with it to go on.
 
 BATCH_TASK_NOT_READY: the task has not finished; BATCH_TASK_FAILED: it failed (task_error holds its error); BATCH_RESULT_EXPIRED: past the job's retention (14 days by default); rerun to scrape it again.`,
       inputSchema: {
@@ -692,9 +695,16 @@ BATCH_TASK_NOT_READY: the task has not finished; BATCH_TASK_FAILED: it failed (t
           .max(10_000_000)
           .nullish()
           .describe(`Max characters of a text result to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
+        lookup_cursor: z
+          .string()
+          .min(1)
+          .nullish()
+          .describe(
+            "lookup_cursor from a previous batch_content reply on a binary result, to go on looking for its result_url"
+          ),
       },
     },
-    async ({ job_id, task_id, run_id, max_chars }) => {
+    async ({ job_id, task_id, run_id, max_chars, lookup_cursor }) => {
       const opts = { ...call("batch_content"), runId: run_id ?? undefined };
       try {
         const content = await getTaskContent(job_id, task_id, opts);
@@ -709,17 +719,30 @@ BATCH_TASK_NOT_READY: the task has not finished; BATCH_TASK_FAILED: it failed (t
           }
           return { content: out };
         }
-        const resultUrl = content.resultUrl ?? (await findResultRow(job_id, task_id, opts))?.result_url;
-        return json({
+        const base = {
           ok: true,
           job_id,
           task_id,
           content_type: content.contentType,
           ...(content.bytes !== undefined ? { bytes: content.bytes } : {}),
-          ...(resultUrl ? { result_url: resultUrl } : {}),
-          note: resultUrl
-            ? "Binary result, not inlined. Download result_url within 2 hours; call batch_content again for a fresh one."
-            : "Binary result, not inlined. Its result_url is on the task's row in batch_results (status successful); it is presigned for 2 hours.",
+        };
+        if (content.resultUrl) {
+          return json({ ...base, result_url: content.resultUrl, note: BINARY_NOTE });
+        }
+        const found = await findResultRow(job_id, task_id, { ...opts, cursor: lookup_cursor ?? undefined });
+        if ("row" in found && found.row.result_url) {
+          return json({ ...base, result_url: found.row.result_url, note: BINARY_NOTE });
+        }
+        if ("cursor" in found) {
+          return json({
+            ...base,
+            lookup_cursor: found.cursor,
+            note: "Binary result, not inlined. Its result_url was not found yet in this large run's results: call batch_content again with lookup_cursor to go on looking.",
+          });
+        }
+        return json({
+          ...base,
+          note: "Binary result, not inlined, and its row has no result_url in batch_results (status successful). Call batch_content again later.",
         });
       } catch (e) {
         return batchErr(e, job_id, { task_id });

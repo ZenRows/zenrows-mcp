@@ -554,7 +554,10 @@ test("batch_wait sends no progress notification without a progressToken", async 
 test("batch_results returns limit rows (default 100) and a next_cursor that resumes, never the whole job", async () => {
   const { handlers } = register();
   const page = (c: number) => ({
-    results: Array.from({ length: 1000 }, (_, i) => ({ task_id: `T${c * 1000 + i}`, status: "successful" })),
+    results: Array.from({ length: 1000 }, (_, i) => ({
+      task_id: `T${String(c * 1000 + i).padStart(6, "0")}`,
+      status: "successful",
+    })),
     next_cursor: c < 9 ? String(c + 1) : null,
   });
   await withFetch(
@@ -565,9 +568,9 @@ test("batch_results returns limit rows (default 100) and a next_cursor that resu
       assert.equal(first.partial, true);
       assert.ok(first.next_cursor);
       const second = parse(await handlers.batch_results!({ job_id: "J1", cursor: first.next_cursor, limit: 1000 }));
-      assert.equal(second.results[0].task_id, "T100");
+      assert.equal(second.results[0].task_id, "T000100");
       assert.equal(second.count, 1000);
-      assert.equal(second.results[999].task_id, "T1099");
+      assert.equal(second.results[999].task_id, "T001099");
     }
   );
 });
@@ -790,6 +793,27 @@ test("batch_create with wait returns the finished run", async () => {
       const body = parse(await handlers.batch_create!({ urls: ["https://a.com"], wait: true, wait_timeout: 10 }));
       assert.equal(body.status, "completed");
       assert.equal(body.ok, true);
+    }
+  );
+});
+
+test("batch_content on a binary result in a large run hands back lookup_cursor and resumes with it", async () => {
+  const { handlers } = register();
+  let page = 0;
+  await withFetch(
+    (req) => {
+      if (req.url.includes("/content")) {
+        return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+      }
+      const c = Number(new URL(req.url).searchParams.get("cursor") ?? 0);
+      page = c;
+      const rows = c === 1 ? [{ task_id: "TX", result_url: "https://s3.example/TX?sig" }] : [{ task_id: `A${c}` }];
+      return jsonRes({ results: rows, next_cursor: c < 1 ? String(c + 1) : null });
+    },
+    async () => {
+      const done = parse(await handlers.batch_content!({ job_id: "J1", task_id: "TX", lookup_cursor: "1" }));
+      assert.equal(done.result_url, "https://s3.example/TX?sig");
+      assert.equal(page, 1);
     }
   );
 });

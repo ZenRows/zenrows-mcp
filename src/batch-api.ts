@@ -148,11 +148,12 @@ interface RequestOpts {
 const RETRIES = 3;
 /** The longest a Retry-After may make one retry wait, so a large server value cannot hang a call. */
 export const MAX_RETRY_AFTER_SECONDS = 30;
-const GET_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
+// 500 included: the Batch API answers a failed storage read with 500 internal, which a retry can fix.
+const GET_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 500, 502, 503, 504]);
 // A 429 from the Batch API is an account limit (active jobs, scheduled jobs, open-job size) and
 // carries no Retry-After: a retry only waits for a slot. A POST retries a 429 only when something
 // in front of the API sent Retry-After.
-const POST_RETRY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
+const POST_RETRY_STATUSES: ReadonlySet<number> = new Set([500, 502, 503, 504]);
 
 /** 250 ms x 2^attempt, +/-20% jitter, capped at 10 s. */
 function backoffMs(attempt: number): number {
@@ -181,21 +182,23 @@ function shouldRetry(method: string, opts: RequestOpts, status: number, retryAft
 }
 
 /**
- * GETs retry on 429, 502, 503, 504 and network errors. A POST retries only when it carries an
- * Idempotency-Key, so the API answers a repeat with the original response instead of creating a
- * second job: on 502, 503, 504, network errors, and a 429 that carries Retry-After. Up to 3
+ * GETs retry on 429, 500, 502, 503, 504 and network errors. A POST retries only when it carries
+ * an Idempotency-Key, so the API answers a repeat with the original response instead of creating
+ * a second job: on 500, 502, 503, 504, network errors, and a 429 that carries Retry-After. Up to 3
  * retries, honoring Retry-After (capped at MAX_RETRY_AFTER_SECONDS). With a deadline, no attempt
  * starts after it, each attempt's timeout ends at it, and a retry is made only if its wait ends
- * before it. `raw` leaves a success body unread for the caller and hands back a redirect as is,
- * so the API key is never sent to the redirect's host.
+ * before it. With `consume`, a success or a redirect is handed to it instead of read as text: it
+ * runs under the same timeout and retries, and a redirect is not followed, so the API key is never
+ * sent to the redirect's host. A BatchError it throws ends the call; any other error is retried
+ * like a network error.
  */
-async function batchFetch(
+async function batchFetch<T = undefined>(
   method: string,
   path: string,
   opts: RequestOpts,
   accept = "application/json",
-  raw = false
-): Promise<{ res: Response; body: string }> {
+  consume?: (res: Response, signal: AbortSignal) => Promise<T>
+): Promise<{ res: Response; body: string; value?: T }> {
   const url = new URL(batchBase() + path);
   for (const [k, v] of Object.entries(opts.query ?? {})) {
     if (v !== undefined && v !== null) url.searchParams.set(k, v);
@@ -228,18 +231,22 @@ async function batchFetch(
     const timeout = setTimeout(() => controller.abort(), Math.max(0, Math.min(opts.timeoutMs ?? 60_000, left())));
     let res: Response;
     let body = "";
+    let value: T | undefined;
+    let handed = false;
     try {
       res = await doFetch(url.toString(), {
         method,
         headers,
         body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
         signal: controller.signal,
-        ...(raw ? { redirect: "manual" as const } : {}),
+        ...(consume ? { redirect: "manual" as const } : {}),
       });
-      const passThrough = raw && (res.ok || (res.status >= 300 && res.status < 400));
-      if (!passThrough) body = await res.text();
+      handed = !!consume && res.status >= 200 && res.status < 400;
+      if (handed) value = await consume!(res, controller.signal);
+      else body = await res.text();
     } catch (err) {
       clearTimeout(timeout);
+      if (err instanceof BatchError) throw err;
       lastError = new BatchError({
         code: "BACKEND_UNAVAILABLE",
         message: `Could not reach the Zenrows Batch API: ${err instanceof Error ? err.message : String(err)}`,
@@ -252,8 +259,7 @@ async function batchFetch(
       throw lastError;
     }
     clearTimeout(timeout);
-    if (res.status >= 200 && res.status < 300) return { res, body };
-    if (raw && res.status >= 300 && res.status < 400) return { res, body };
+    if (handed || (res.status >= 200 && res.status < 300)) return { res, body, value };
 
     const retryAfter = retryAfterSeconds(res.headers.get("retry-after"));
     lastError = problemToError(res.status, body, method, path, retryAfter);
@@ -303,7 +309,7 @@ const CONFLICTS: Record<string, [code: string, message: string]> = {
   ],
   idempotency_key_conflict: [
     "BATCH_IDEMPOTENCY_CONFLICT",
-    "This idempotency key was used for a different request, or the first request with it is still in progress. Send a new idempotency_key, or none, or retry the identical request later.",
+    "This idempotency key was used with a different request, or the first request with it has not finished. To retry the same request, keep this key and retry later, and check batch_list first: the first request may have created the job or run. Use a new key only for a different request; a new key on the same request can create a second, billed job.",
   ],
   task_not_ready: [
     "BATCH_TASK_NOT_READY",
@@ -545,10 +551,14 @@ export const DEFAULT_RESULTS_LIMIT = 100;
 /** Most API pages one batch_results call reads, so a sparse filter cannot scan a whole job in one call. */
 export const MAX_RESULT_PAGES_PER_CALL = 10;
 
-/** Where a results read stopped: the API page it was on and how many of its rows were already returned. */
+/**
+ * Where a results read stopped: the API page it was on and the last task_id already returned
+ * from it. Rows in a page come in task_id order, so a read that stopped mid-page resumes after
+ * that id, even when rows left or joined the filter (a processing row that finished) in between.
+ */
 interface ResultsCursor {
   c: string | null;
-  o: number;
+  a?: string;
 }
 
 export function encodeResultsCursor(c: ResultsCursor): string {
@@ -558,8 +568,8 @@ export function encodeResultsCursor(c: ResultsCursor): string {
 export function decodeResultsCursor(s: string): ResultsCursor {
   try {
     const v = JSON.parse(Buffer.from(s, "base64url").toString("utf8")) as Partial<ResultsCursor>;
-    if ((typeof v.c === "string" || v.c === null) && typeof v.o === "number" && v.o >= 0) {
-      return { c: v.c, o: Math.floor(v.o) };
+    if ((typeof v.c === "string" || v.c === null) && (v.a === undefined || typeof v.a === "string")) {
+      return { c: v.c, ...(v.a !== undefined ? { a: v.a } : {}) };
     }
   } catch {
     // fall through
@@ -581,8 +591,8 @@ export interface ResultsRead {
 
 /**
  * Reads up to `limit` rows from `cursor` on. The API's pages hold about 1,000 rows and take no
- * size, so the returned cursor names the page and the offset inside it: a call that stops
- * mid-page resumes there next time, without skipping or repeating rows. Reads at most
+ * size, so a call that stops mid-page returns a cursor naming that page and the last task_id it
+ * returned; the next call reads the page again and goes on after that id. Reads at most
  * MAX_RESULT_PAGES_PER_CALL pages, then returns what it has with a cursor.
  */
 export async function readResults(
@@ -590,23 +600,27 @@ export async function readResults(
   opts: CallOpts & { status?: ResultsStatus; cursor?: string; limit?: number; runId?: string }
 ): Promise<ResultsRead> {
   const limit = opts.limit ?? DEFAULT_RESULTS_LIMIT;
-  const start = opts.cursor ? decodeResultsCursor(opts.cursor) : { c: null, o: 0 };
+  const start: ResultsCursor = opts.cursor ? decodeResultsCursor(opts.cursor) : { c: null };
   const results: ResultRow[] = [];
   let apiCursor = start.c;
-  let offset = start.o;
+  let after = start.a;
   for (let pages = 1; ; pages++) {
     const page = await listResultsPage(id, { ...opts, cursor: apiCursor ?? undefined });
-    const rows = page.results.slice(offset);
+    const rows = after === undefined ? page.results : page.results.filter((r) => r.task_id > after!);
     const take = rows.slice(0, limit - results.length);
     results.push(...take);
     if (take.length < rows.length) {
-      return { results, next_cursor: encodeResultsCursor({ c: apiCursor, o: offset + take.length }), pages };
+      return {
+        results,
+        next_cursor: encodeResultsCursor({ c: apiCursor, a: take[take.length - 1]?.task_id ?? after }),
+        pages,
+      };
     }
     if (page.next_cursor === null) return { results, next_cursor: null, pages };
     apiCursor = page.next_cursor;
-    offset = 0;
+    after = undefined;
     if (results.length >= limit || pages >= MAX_RESULT_PAGES_PER_CALL) {
-      return { results, next_cursor: encodeResultsCursor({ c: apiCursor, o: 0 }), pages };
+      return { results, next_cursor: encodeResultsCursor({ c: apiCursor }), pages };
     }
   }
 }
@@ -621,7 +635,10 @@ export type TaskContent =
   | { kind: "text"; contentType: string; body: string }
   | { kind: "binary"; contentType: string; bytes?: number; resultUrl?: string };
 
-/** Reads a success response as text, or describes a binary one without downloading it. */
+/**
+ * Reads a success response as text, or describes a binary one without downloading it. Runs while
+ * the request's timeout is still armed, so a stalled body ends the call instead of hanging it.
+ */
 async function toContent(res: Response, resultUrl?: string): Promise<TaskContent> {
   const contentType = res.headers.get("content-type") ?? "";
   if (contentType && !isTextContentType(contentType)) {
@@ -640,7 +657,8 @@ async function toContent(res: Response, resultUrl?: string): Promise<TaskContent
 /**
  * One task's stored result. Text bodies are read; a binary body (a PDF) is not downloaded.
  * When the API redirects to a presigned URL, that URL is followed without the API key and comes
- * back as resultUrl for a binary body.
+ * back as resultUrl for a binary body. Reading the body, the redirect's included, is bounded by
+ * the request timeout and retried like the request.
  */
 export async function getTaskContent(
   id: string,
@@ -648,33 +666,29 @@ export async function getTaskContent(
   opts: CallOpts & { runId?: string }
 ): Promise<TaskContent> {
   const path = `${runPrefix(id, opts.runId)}/tasks/${encodeURIComponent(taskId)}/content`;
-  const { res } = await batchFetch("GET", path, opts, "*/*", true);
-  if (res.status < 300) return toContent(res);
-  const location = res.headers.get("location");
-  if (!location) {
-    throw new BatchError({
-      code: "BATCH_FAILED",
-      message: `The Batch API redirected (HTTP ${res.status}) without a Location.`,
-    });
-  }
-  const target = new URL(location, batchBase() + path).toString();
-  let followed: Response;
-  try {
-    followed = await (opts.fetchImpl ?? fetch)(target, { signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000) });
-  } catch (err) {
-    throw new BatchError({
-      code: "BACKEND_UNAVAILABLE",
-      message: `Could not read the task's result_url: ${err instanceof Error ? err.message : String(err)}`,
-    });
-  }
-  if (!followed.ok) {
-    throw new BatchError({
-      code: "BATCH_FAILED",
-      message: `Reading the task's result_url failed (HTTP ${followed.status}).`,
-      status: followed.status,
-    });
-  }
-  return toContent(followed, target);
+  const doFetch = opts.fetchImpl ?? fetch;
+  const { value } = await batchFetch("GET", path, opts, "*/*", async (res, signal) => {
+    if (res.status < 300) return toContent(res);
+    const location = res.headers.get("location");
+    if (!location) {
+      throw new BatchError({
+        code: "BATCH_FAILED",
+        message: `The Batch API redirected (HTTP ${res.status}) without a Location.`,
+      });
+    }
+    const target = new URL(location, batchBase() + path).toString();
+    const followed = await doFetch(target, { signal });
+    if (!followed.ok) {
+      await followed.body?.cancel().catch(() => undefined);
+      throw new BatchError({
+        code: "BATCH_FAILED",
+        message: `Reading the task's result_url failed (HTTP ${followed.status}).`,
+        status: followed.status,
+      });
+    }
+    return toContent(followed, target);
+  });
+  return value!;
 }
 
 /**
@@ -742,22 +756,33 @@ export async function waitForJob(
   }
 }
 
+/** How long one batch_content call may look for a binary result's row before it hands back a cursor. */
+export const FIND_ROW_BUDGET_MS = 40_000;
+
+export type FindRowOutcome =
+  | { row: ResultRow }
+  | { notFound: true }
+  /** The budget ran out first: pass `cursor` back to go on from there. */
+  | { cursor: string };
+
 /**
- * Finds one task's row in a run's results, reading at most `maxPages` pages of successful rows.
- * Undefined when it is not in them. Used to hand out a binary result's presigned URL.
+ * Looks for one task's row in a run's successful results, to hand out a binary result's
+ * presigned URL. Bounded by `budgetMs`; past it, it returns a cursor to resume from.
  */
 export async function findResultRow(
   id: string,
   taskId: string,
-  opts: CallOpts & { runId?: string; maxPages?: number }
-): Promise<ResultRow | undefined> {
-  let cursor: string | undefined;
-  for (let page = 0; page < (opts.maxPages ?? MAX_RESULT_PAGES_PER_CALL); page++) {
+  opts: CallOpts & { runId?: string; cursor?: string; budgetMs?: number }
+): Promise<FindRowOutcome> {
+  const deadline = Date.now() + (opts.budgetMs ?? FIND_ROW_BUDGET_MS);
+  let cursor = opts.cursor;
+  for (;;) {
     const read = await listResultsPage(id, { ...opts, status: "successful", cursor });
     const row = read.results.find((r) => r.task_id === taskId);
-    if (row) return row;
-    if (read.next_cursor === null) return undefined;
+    if (row) return { row };
+    // No early stop on task_id order: the API keeps order inside a page, not always across pages.
+    if (read.next_cursor === null) return { notFound: true };
     cursor = read.next_cursor;
+    if (Date.now() >= deadline) return { cursor };
   }
-  return undefined;
 }

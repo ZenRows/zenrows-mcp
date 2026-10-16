@@ -7,6 +7,7 @@ import {
   decodeResultsCursor,
   deleteJob,
   getJob,
+  findResultRow,
   getTaskContent,
   listJobs,
   readResults,
@@ -358,6 +359,9 @@ test("requests carry the extra headers, the API key and the user agent", async (
   assert.equal(seen?.get("user-agent"), "ua");
 });
 
+/** Task ids sort like the API's ULIDs: fixed width. */
+const tid = (n: number) => `T${String(n).padStart(6, "0")}`;
+
 /** A results API with `pages` pages of `size` rows; cursors are page numbers. */
 function resultsApi(pages: number, size: number, seen: (string | null)[] = []) {
   return (async (input: RequestInfo | URL) => {
@@ -365,7 +369,7 @@ function resultsApi(pages: number, size: number, seen: (string | null)[] = []) {
     const c = url.searchParams.get("cursor");
     seen.push(c);
     const p = Number(c ?? 0);
-    const results = Array.from({ length: size }, (_, i) => ({ task_id: `T${p * size + i}` }));
+    const results = Array.from({ length: size }, (_, i) => ({ task_id: tid(p * size + i) }));
     return jsonRes({ results, next_cursor: p + 1 < pages ? String(p + 1) : null });
   }) as typeof fetch;
 }
@@ -385,8 +389,8 @@ test("readResults returns limit rows and a cursor that resumes mid-page without 
   }
   assert.equal(ids.length, 3000);
   assert.equal(new Set(ids).size, 3000);
-  assert.equal(ids[0], "T0");
-  assert.equal(ids[2999], "T2999");
+  assert.equal(ids[0], tid(0));
+  assert.equal(ids[2999], tid(2999));
   assert.equal(calls, 8);
 });
 
@@ -572,4 +576,107 @@ test("deleteJob accepts an empty 202, and listJobs sends its filters", async () 
   await listJobs({ apiKey: "k", fetchImpl, limit: 5, status: "closed", type: "regular", cursor: "c1" });
   assert.match(urls[0]!, /^DELETE .*\/jobs\/J1$/);
   assert.match(urls[1]!, /^GET .*\/jobs\?cursor=c1&limit=5&status=closed&type=regular$/);
+});
+
+test("readResults resumes mid-page by task id, so rows that leave a processing filter do not hide the rest", async () => {
+  // A, B, C are processing; after the first call A and B finish and drop out of the filter.
+  let finished: string[] = [];
+  const fetchImpl = (async () =>
+    jsonRes({
+      results: ["A", "B", "C"].filter((t) => !finished.includes(t)).map((task_id) => ({ task_id })),
+      next_cursor: null,
+    })) as typeof fetch;
+  const first = await readResults("J1", { apiKey: "k", fetchImpl, status: "processing", limit: 2 });
+  assert.deepEqual(
+    first.results.map((r) => r.task_id),
+    ["A", "B"]
+  );
+  assert.notEqual(first.next_cursor, null);
+  finished = ["A", "B"];
+  const second = await readResults("J1", { apiKey: "k", fetchImpl, status: "processing", cursor: first.next_cursor! });
+  assert.deepEqual(
+    second.results.map((r) => r.task_id),
+    ["C"]
+  );
+  assert.equal(second.next_cursor, null);
+});
+
+test("GETs and polls retry a 500, which the API sends when a storage read fails", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return calls === 1
+      ? jsonRes({ code: "internal" }, 500)
+      : jsonRes({ job_id: "J1", latest_run: run({ status: "completed" }) });
+  }) as typeof fetch;
+  const out = await waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 20 });
+  assert.equal(out.job?.latest_run?.status, "completed");
+  assert.equal(calls, 2);
+});
+
+test("getTaskContent keeps the request timeout armed while the body is read", async () => {
+  const fetchImpl = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+    const signal = init!.signal!;
+    // Headers arrive at once; the body never does, until the signal aborts it.
+    const body = new ReadableStream({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(new Error("aborted")));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  const t0 = Date.now();
+  await assert.rejects(
+    () => getTaskContent("J1", "T1", { apiKey: "k", fetchImpl, timeoutMs: 50, deadline: Date.now() + 400 }),
+    (e: unknown) => e instanceof BatchError && e.code === "BACKEND_UNAVAILABLE"
+  );
+  assert.ok(Date.now() - t0 < 2000);
+});
+
+test("getTaskContent retries a body that broke off mid-read", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    if (calls === 1) {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("<html>"));
+          controller.error(new Error("socket hang up"));
+        },
+      });
+      return new Response(body, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    return new Response("<html>ok</html>", { status: 200, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  const c = await getTaskContent("J1", "T1", { apiKey: "k", fetchImpl });
+  assert.deepEqual(c, { kind: "text", contentType: "text/html", body: "<html>ok</html>" });
+  assert.equal(calls, 2);
+});
+
+test("findResultRow finds a row past the tenth page, and hands back a cursor when its budget runs out", async () => {
+  const fetchImpl = resultsApi(15, 1000);
+  const found = await findResultRow("J1", tid(11_500), { apiKey: "k", fetchImpl });
+  assert.deepEqual(found, { row: { task_id: tid(11_500) } });
+  const partial = await findResultRow("J1", tid(11_500), { apiKey: "k", fetchImpl, budgetMs: 0 });
+  assert.ok("cursor" in partial);
+  const resumed = await findResultRow("J1", tid(11_500), {
+    apiKey: "k",
+    fetchImpl,
+    cursor: (partial as { cursor: string }).cursor,
+  });
+  assert.ok("row" in resumed);
+  assert.deepEqual(await findResultRow("J1", "nope", { apiKey: "k", fetchImpl }), { notFound: true });
+});
+
+test("the idempotency conflict advice keeps the key for the same request", async () => {
+  const fetchImpl = (async () => jsonRes({ code: "idempotency_key_conflict" }, 409)) as typeof fetch;
+  await assert.rejects(
+    () => createJob({}, { apiKey: "k", fetchImpl, idempotencyKey: "x" }),
+    (e: unknown) =>
+      e instanceof BatchError &&
+      e.code === "BATCH_IDEMPOTENCY_CONFLICT" &&
+      /keep this key/.test(e.message) &&
+      /batch_list/.test(e.message) &&
+      !/or none/.test(e.message)
+  );
 });
