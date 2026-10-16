@@ -4,7 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import { buildExtractParams, isEmptyData, registerExtractTool, runExtract, zrErrorCode } from "../src/tools/extract.ts";
+import {
+  buildExtractParams,
+  FALLBACK_AUTOPARSE_NOTE,
+  isEmptyData,
+  refusalReason,
+  registerExtractTool,
+  runExtract,
+  zrErrorCode,
+} from "../src/tools/extract.ts";
 
 /** Minimal stand-in for McpServer#registerTool — captures the handler so we can call it directly. */
 function fakeServer() {
@@ -49,34 +57,170 @@ test("zrErrorCode reads code field and AUTH from error string", () => {
   assert.equal(zrErrorCode(JSON.stringify({ error: "nope (AUTH004)" })), "AUTH004");
 });
 
-test("runExtract falls back to autoparse on AUTH010 for mode=auto", async () => {
+test("runExtract ignores fallback_autoparse: true on AUTH010: one call, the prepare error, and a note", async () => {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    calls.push(url);
-    if (url.includes("extract=auto")) {
-      return new Response(AUTH010, {
-        status: 402,
-        headers: { "content-type": "application/json" },
-      });
+    calls.push(String(input));
+    return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
+
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls.length, 1, "fallback_autoparse must not retry with autoparse");
+  assert.doesNotMatch(calls[0]!, /autoparse=true/);
+  const body = JSON.parse(outcome.errorText) as {
+    code: string;
+    reason: string;
+    next_tool?: { name: string };
+    note?: string;
+  };
+  assert.equal(body.code, "AUTH010");
+  assert.equal(body.reason, "domain_not_prepared");
+  assert.equal(body.next_tool?.name, "prepare_domain");
+  assert.equal(body.note, FALLBACK_AUTOPARSE_NOTE);
+});
+
+const PREPARE_MESSAGE =
+  'Extract hasn\'t prepared example.com yet. Call prepare_domain with domain "example.com" and 1 to 5 example URLs ' +
+  "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css.";
+
+test("runExtract reports REQS007 by default with the prepare step, in one call", async () => {
+  const calls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ code: "REQS007", detail: "Extract has not been prepared" }), { status: 403 });
+  }) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://www.example.com/item/1" }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls.length, 1, "REQS007 must not be retried with autoparse");
+  const body = JSON.parse(outcome.errorText) as {
+    code: string;
+    message: string;
+    next_tool: { name: string; arguments: { domain: string; example_urls: string[] } };
+    then: string;
+  };
+  assert.equal(body.code, "REQS007");
+  assert.equal(body.message, PREPARE_MESSAGE);
+  assert.deepEqual(body.next_tool, {
+    name: "prepare_domain",
+    arguments: { domain: "example.com", example_urls: ["https://www.example.com/item/1"] },
+  });
+  assert.match(body.then, /prepared_domain_status/);
+});
+
+/** A REQS007 the way the gateway sends it: with `reason`, or (an older gateway) without. */
+function reqs007(kind: "domain" | "page" | "allowlist", withReason: boolean): string {
+  const bodies = {
+    domain: {
+      title: "Extract is not prepared for the requested domain (example.com) (REQS007)",
+      detail: "Extract has not been prepared for example.com yet.",
+      reason: "domain_not_prepared",
+    },
+    page: {
+      title: "Extract did not recognise this page on example.com (REQS007)",
+      detail: "Extract serves example.com, but did not recognise this page as one it can extract.",
+      reason: "page_not_recognised",
+    },
+    allowlist: {
+      title: "Extract is not enabled for the requested domain (example.com) (REQS007)",
+      detail: "Extract is not enabled for the requested domain (example.com) yet.",
+      reason: "domain_not_enabled",
+    },
+  } as const;
+  const { reason, ...rest } = bodies[kind];
+  return JSON.stringify({ code: "REQS007", status: 403, ...rest, ...(withReason ? { reason } : {}) });
+}
+
+async function reqs007Error(body: string, url = "https://example.com/search?q=x") {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return new Response(body, { status: 403 });
+  }) as typeof fetch;
+  const outcome = await runExtract("testkey", { url }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  assert.equal(calls, 1);
+  if (outcome.ok) throw new Error("unreachable");
+  return {
+    raw: outcome.errorText,
+    err: JSON.parse(outcome.errorText) as { code: string; reason: string; message: string; next_tool?: unknown },
+  };
+}
+
+for (const withReason of [true, false]) {
+  const via = withReason ? "the reason field" : "the title (gateway without the reason field)";
+
+  test(`REQS007 page_not_recognised, read from ${via}: gateway's advice in order, no prepare_domain`, async () => {
+    const { raw, err } = await reqs007Error(reqs007("page", withReason));
+    assert.equal(err.code, "REQS007");
+    assert.equal(err.reason, "page_not_recognised");
+    const steps = [
+      /product, article or listing page/,
+      /retry it once in a few minutes; do not retry in a loop/,
+      /mode=css with a css_extractor/,
+      /Preparing the domain again does not change this/,
+    ];
+    let last = -1;
+    for (const step of steps) {
+      const at = err.message.search(step);
+      assert.ok(at > last, `${step} missing or out of order in: ${err.message}`);
+      last = at;
     }
-    return new Response(JSON.stringify({ title: "fallback" }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
+    assert.equal(err.next_tool, undefined, "no prepare_domain: it would answer ready and loop");
+    assert.doesNotMatch(raw, /autoparse|contact Zenrows support/);
+  });
+
+  test(`REQS007 domain_not_enabled, read from ${via}: no prepare_domain, css`, async () => {
+    const { raw, err } = await reqs007Error(reqs007("allowlist", withReason));
+    assert.equal(err.reason, "domain_not_enabled");
+    assert.match(err.message, /preparing it does not change this/);
+    assert.match(err.message, /mode=css/);
+    assert.equal(err.next_tool, undefined);
+    assert.doesNotMatch(raw, /autoparse/);
+  });
+
+  test(`REQS007 domain_not_prepared, read from ${via}: prepare_domain`, async () => {
+    const { err } = await reqs007Error(reqs007("domain", withReason), "https://www.example.com/p/1");
+    assert.equal(err.reason, "domain_not_prepared");
+    assert.deepEqual(err.next_tool, {
+      name: "prepare_domain",
+      arguments: { domain: "example.com", example_urls: ["https://www.example.com/p/1"] },
     });
+  });
+}
+
+test("refusalReason trusts the field over the sentence, and ignores a reason it does not know", () => {
+  const pageTitleWithDomainReason = JSON.stringify({
+    code: "REQS007",
+    title: "Extract did not recognise this page on x.com (REQS007)",
+    reason: "domain_not_prepared",
+  });
+  assert.equal(refusalReason(pageTitleWithDomainReason), "domain_not_prepared");
+  assert.equal(
+    refusalReason(JSON.stringify({ code: "REQS007", reason: "something_new", detail: "Extract serves x.com, but" })),
+    "page_not_recognised"
+  );
+  assert.equal(refusalReason("not json"), "domain_not_prepared");
+});
+
+test("runExtract reports legacy AUTH010 by default like REQS007, in one call", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(AUTH010, { status: 402, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
 
   const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
-
-  assert.equal(outcome.ok, true);
-  if (!outcome.ok) return;
-  assert.equal(outcome.mode, "autoparse");
-  assert.equal(outcome.fellBackToAutoparse, true);
-  assert.deepEqual(outcome.data, { title: "fallback" });
-  assert.equal(calls.length, 2);
-  assert.match(calls[0]!, /extract=auto/);
-  assert.match(calls[1]!, /autoparse=true/);
-  assert.doesNotMatch(calls[1]!, /extract=auto/);
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls, 1);
+  const body = JSON.parse(outcome.errorText) as { code: string; message: string };
+  assert.equal(body.code, "AUTH010");
+  assert.equal(body.message, PREPARE_MESSAGE);
 });
 
 test("runExtract does not fall back when fallback_autoparse is false", async () => {
@@ -91,9 +235,9 @@ test("runExtract does not fall back when fallback_autoparse is false", async () 
   assert.equal(outcome.ok, false);
   if (outcome.ok) return;
   assert.equal(calls, 1);
-  const body = JSON.parse(outcome.errorText) as { code: string; mode: string };
+  const body = JSON.parse(outcome.errorText) as { code: string; message: string };
   assert.equal(body.code, "AUTH010");
-  assert.equal(body.mode, "auto");
+  assert.equal(body.message, PREPARE_MESSAGE);
 });
 
 test("runExtract does not fall back on AUTH004", async () => {
@@ -110,29 +254,6 @@ test("runExtract does not fall back on AUTH004", async () => {
   assert.equal(JSON.parse(outcome.errorText).code, "AUTH004");
 });
 
-test("runExtract surfaces autoparse failure after AUTH010 fallback", async () => {
-  const fetchImpl = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    if (url.includes("extract=auto")) {
-      return new Response(AUTH010, {
-        status: 402,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return new Response("upstream boom", {
-      status: 500,
-      headers: { "content-type": "text/plain" },
-    });
-  }) as typeof fetch;
-
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
-  assert.equal(outcome.ok, false);
-  if (outcome.ok) return;
-  const body = JSON.parse(outcome.errorText) as { code: string; mode: string };
-  assert.equal(body.code, "EXTRACT_FAILED");
-  assert.equal(body.mode, "autoparse");
-});
-
 test("runExtract unwraps extract=auto {parsed,html} envelope", async () => {
   const fetchImpl = (async () =>
     new Response(JSON.stringify({ parsed: { title: "T" }, html: "<h1>T</h1>" }), {
@@ -144,7 +265,17 @@ test("runExtract unwraps extract=auto {parsed,html} envelope", async () => {
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
   assert.equal(outcome.mode, "auto");
-  assert.equal(outcome.fellBackToAutoparse, false);
+  assert.deepEqual(outcome.data, { title: "T" });
+  assert.equal(outcome.html, undefined, "html is returned only with include_html");
+});
+
+test("runExtract returns the page html when include_html is true", async () => {
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify({ parsed: { title: "T" }, html: "<h1>T</h1>" }), { status: 200 })) as typeof fetch;
+
+  const outcome = await runExtract("testkey", { url: "https://example.com", include_html: true }, { fetchImpl });
+  assert.equal(outcome.ok, true);
+  if (!outcome.ok) return;
   assert.deepEqual(outcome.data, { title: "T" });
   assert.equal(outcome.html, "<h1>T</h1>");
 });
@@ -222,27 +353,76 @@ test("buildExtractParams: premium_proxy alone overrides Adaptive Stealth Mode", 
   assert.equal(sp.get("premium_proxy"), "true");
 });
 
-test("runExtract falls back to autoparse on REQS007 (domain not prepared)", async () => {
+test("runExtract ignores fallback_autoparse: true on REQS007: one call, the prepare error, and a note", async () => {
   const calls: string[] = [];
   const fetchImpl = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    calls.push(url);
-    if (url.includes("extract=auto")) {
-      return new Response(JSON.stringify({ code: "REQS007", detail: "Extract has not been prepared" }), {
-        status: 403,
-      });
-    }
-    return new Response(JSON.stringify({ title: "fallback" }), { status: 200 });
+    calls.push(String(input));
+    return new Response(JSON.stringify({ code: "REQS007", detail: "Extract has not been prepared" }), { status: 403 });
   }) as typeof fetch;
 
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.equal(calls.length, 1);
+  const body = JSON.parse(outcome.errorText) as {
+    code: string;
+    reason: string;
+    next_tool?: { name: string };
+    note?: string;
+  };
+  assert.equal(body.code, "REQS007");
+  assert.equal(body.reason, "domain_not_prepared");
+  assert.equal(body.next_tool?.name, "prepare_domain");
+  assert.equal(body.note, FALLBACK_AUTOPARSE_NOTE);
+});
+
+test("runExtract adds the fallback_autoparse note to a successful result, after one call", async () => {
+  let n = 0;
+  const fetchImpl = (async () => {
+    n++;
+    return new Response(JSON.stringify({ parsed: { title: "T" } }), { status: 200 });
+  }) as typeof fetch;
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;
-  assert.equal(outcome.fellBackToAutoparse, true);
-  assert.equal(outcome.mode, "autoparse");
-  assert.equal(calls.length, 2);
-  assert.match(calls[1]!, /autoparse=true/);
-  assert.match(calls[1]!, /mode=auto/);
+  assert.equal(n, 1);
+  assert.deepEqual(outcome.data, { title: "T" });
+  assert.equal(outcome.note, FALLBACK_AUTOPARSE_NOTE);
+});
+
+test("runExtract appends the fallback_autoparse note as a line to a plain-text error", async () => {
+  const fetchImpl = (async () => {
+    throw new Error("connection reset");
+  }) as typeof fetch;
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
+  assert.equal(outcome.ok, false);
+  if (outcome.ok) return;
+  assert.match(outcome.errorText, /^Network error contacting Zenrows: connection reset\n/);
+  assert.ok(outcome.errorText.endsWith(FALLBACK_AUTOPARSE_NOTE));
+});
+
+test("runExtract adds no note without fallback_autoparse, or with it false", async () => {
+  for (const fallback_autoparse of [undefined, false]) {
+    const ok = await runExtract(
+      "testkey",
+      { url: "https://example.com", fallback_autoparse },
+      {
+        fetchImpl: (async () =>
+          new Response(JSON.stringify({ parsed: { title: "T" } }), { status: 200 })) as typeof fetch,
+      }
+    );
+    assert.equal(ok.ok && ok.note, undefined);
+    const failed = await runExtract(
+      "testkey",
+      { url: "https://example.com", fallback_autoparse },
+      {
+        fetchImpl: (async () => new Response(JSON.stringify({ code: "REQS007" }), { status: 403 })) as typeof fetch,
+      }
+    );
+    assert.equal(failed.ok, false);
+    if (failed.ok) return;
+    assert.doesNotMatch(failed.errorText, /fallback_autoparse/);
+  }
 });
 
 test("runExtract does not fall back on REQS007 when fallback_autoparse is false", async () => {
@@ -258,7 +438,7 @@ test("runExtract does not fall back on REQS007 when fallback_autoparse is false"
   assert.equal(n, 1);
 });
 
-test("runExtract only falls back from mode=auto, not from autoparse or css", async () => {
+test("runExtract makes one call in autoparse and css modes too, with fallback_autoparse: true", async () => {
   for (const mode of ["autoparse", "css"] as const) {
     let n = 0;
     const fetchImpl = (async () => {
@@ -267,7 +447,7 @@ test("runExtract only falls back from mode=auto, not from autoparse or css", asy
     }) as typeof fetch;
     const outcome = await runExtract(
       "testkey",
-      { url: "https://example.com", mode, css_extractor: '{"t":"h1"}' },
+      { url: "https://example.com", mode, css_extractor: '{"t":"h1"}', fallback_autoparse: true },
       { fetchImpl }
     );
     assert.equal(outcome.ok, false, mode);
@@ -275,13 +455,13 @@ test("runExtract only falls back from mode=auto, not from autoparse or css", asy
   }
 });
 
-test("runExtract does not fall back on other 403s", async () => {
+test("runExtract makes one call on other 403s, with fallback_autoparse: true", async () => {
   let n = 0;
   const fetchImpl = (async () => {
     n++;
     return new Response(JSON.stringify({ code: "REQS001", detail: "blocked by policy" }), { status: 403 });
   }) as typeof fetch;
-  const outcome = await runExtract("testkey", { url: "https://example.com" }, { fetchImpl });
+  const outcome = await runExtract("testkey", { url: "https://example.com", fallback_autoparse: true }, { fetchImpl });
   assert.equal(outcome.ok, false);
   assert.equal(n, 1);
 });
@@ -292,6 +472,8 @@ test("isEmptyData treats an object of empty fields as empty", () => {
   assert.equal(isEmptyData({ listings: [], total: 0 }), false);
   assert.equal(isEmptyData({ title: "x" }), false);
   assert.equal(isEmptyData({ flag: false }), false);
+  assert.equal(isEmptyData({ listings: [{ title: null, price: "" }], author: { name: null } }), true);
+  assert.equal(isEmptyData({ listings: [{ title: null }, { title: "A" }] }), false);
 });
 
 test("buildExtractParams keeps wait=0 (a valid explicit value, not falsy-omitted)", () => {
@@ -454,7 +636,11 @@ test("registerExtractTool's handler formats a failure outcome as isError content
   assert.equal(payload.code, "INVALID_USAGE");
 });
 
-const NO_DATA = JSON.stringify({ code: "no_data_extracted", detail: "Extract found no data on this page.", status: 422 });
+const NO_DATA = JSON.stringify({
+  code: "no_data_extracted",
+  detail: "Extract found no data on this page.",
+  status: 422,
+});
 
 test("runExtract reports 422 no_data_extracted as an empty result, in one call, without fallback", async () => {
   const urls: string[] = [];
@@ -470,7 +656,6 @@ test("runExtract reports 422 no_data_extracted as an empty result, in one call, 
   assert.equal(urls.length, 1);
   assert.match(urls[0]!, /extract=auto/);
   assert.equal(outcome.mode, "auto");
-  assert.equal(outcome.fellBackToAutoparse, false);
   assert.equal(outcome.empty, true);
   assert.equal(outcome.noDataExtracted, true);
   assert.equal(outcome.data, null);
