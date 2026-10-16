@@ -46,10 +46,22 @@ test("isQuotaOrPlanError detects 402 and credit/quota signals", () => {
   );
   assert.equal(
     isQuotaOrPlanError({
-      code: "BATCH_QUOTA_EXCEEDED",
-      message: "Subscription has no credit available for the Batch API.",
+      code: "BATCH_INSUFFICIENT_CREDITS",
+      message: "This account has no credits left, so the Batch API refused the request.",
     }),
     true
+  );
+  // Batch's job-count limit: more credits do not raise it, so no claim nudge.
+  assert.equal(
+    isQuotaOrPlanError({
+      status: 429,
+      code: "BATCH_QUOTA_EXCEEDED",
+      body: JSON.stringify({
+        code: "BATCH_QUOTA_EXCEEDED",
+        detail: "HTTP 429 (quota_exceeded): Account already has 3 active jobs",
+      }),
+    }),
+    false
   );
   assert.equal(
     isQuotaOrPlanError({

@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BatchError, batchBase, createJob, getJob, listResults, stopJob, waitForJob } from "../src/batch-api.ts";
+import {
+  BatchError,
+  batchBase,
+  createJob,
+  decodeResultsCursor,
+  deleteJob,
+  getJob,
+  getTaskContent,
+  listJobs,
+  readResults,
+  rerunJob,
+  runFailure,
+  stopJob,
+  waitForJob,
+} from "../src/batch-api.ts";
 
 test("createJob maps 403 problem+json to BATCH_ACCESS_DENIED", async () => {
   const fetchImpl = (async () =>
@@ -92,51 +106,97 @@ test("createJob maps 404 to BATCH_NOT_FOUND", async () => {
   );
 });
 
-test("createJob maps 429 to BATCH_QUOTA_EXCEEDED with a concurrency-specific message", async () => {
-  const fetchImpl = (async () => new Response(JSON.stringify({ title: "too many" }), { status: 429 })) as typeof fetch;
-  await assert.rejects(
-    () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
-    (e: unknown) => {
-      assert.ok(e instanceof BatchError);
-      assert.equal(e.code, "BATCH_QUOTA_EXCEEDED");
-      assert.match(e.message, /concurrent active jobs/);
-      return true;
-    }
-  );
-});
-
-test("createJob maps 402 to BATCH_QUOTA_EXCEEDED with a billing-specific message", async () => {
-  const fetchImpl = (async () => new Response(JSON.stringify({ title: "no credit" }), { status: 402 })) as typeof fetch;
-  await assert.rejects(
-    () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
-    (e: unknown) => {
-      assert.ok(e instanceof BatchError);
-      assert.equal(e.code, "BATCH_QUOTA_EXCEEDED");
-      assert.match(e.message, /no credit/);
-      return true;
-    }
-  );
-});
-
-test("createJob maps an unmapped status to BATCH_FAILED and surfaces invalid_tasks detail", async () => {
+test("createJob maps 429 quota_exceeded to BATCH_QUOTA_EXCEEDED, naming the shared active-jobs limit", async () => {
   const fetchImpl = (async () =>
     new Response(
       JSON.stringify({
-        title: "Bad Request",
-        invalid_tasks: [{ index: 0, reason: "missing url" }],
+        code: "quota_exceeded",
+        detail: "Account already has 3 active jobs; max 3 allowed concurrently.",
       }),
-      { status: 422 }
+      { status: 429 }
+    )) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) => {
+      assert.ok(e instanceof BatchError);
+      assert.equal(e.code, "BATCH_QUOTA_EXCEEDED");
+      assert.equal(e.serverCode, "quota_exceeded");
+      assert.match(e.message, /3 active jobs by default, shared with Crawl/);
+      assert.doesNotMatch(e.message, /credit available/);
+      return true;
+    }
+  );
+});
+
+test("a 429 without quota_exceeded is BATCH_RATE_LIMITED", async () => {
+  const fetchImpl = (async () =>
+    new Response("slow down", { status: 429, headers: { "retry-after": "7" } })) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) => e instanceof BatchError && e.code === "BATCH_RATE_LIMITED" && e.retryAfter === 7
+  );
+});
+
+test("createJob maps 402 payment_required to BATCH_INSUFFICIENT_CREDITS, a code apart from the 429 limit", async () => {
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify({ code: "payment_required", detail: "No credit." }), { status: 402 })) as typeof fetch;
+  await assert.rejects(
+    () => createJob({ tasks: [] }, { apiKey: "k", fetchImpl }),
+    (e: unknown) => {
+      assert.ok(e instanceof BatchError);
+      assert.equal(e.code, "BATCH_INSUFFICIENT_CREDITS");
+      assert.equal(e.toJSON().server_code, "payment_required");
+      assert.match(e.message, /no credits left/);
+      return true;
+    }
+  );
+});
+
+test("a 400 is BATCH_INVALID_REQUEST with server_code and the invalid tasks as data", async () => {
+  const fetchImpl = (async () =>
+    new Response(
+      JSON.stringify({
+        code: "invalid_argument",
+        detail: "1 invalid task",
+        invalid_tasks: [{ index: 0, reason: "invalid_external_id" }],
+      }),
+      { status: 400 }
     )) as typeof fetch;
 
   await assert.rejects(
     () => createJob({ tasks: [{}] }, { apiKey: "k", fetchImpl }),
     (e: unknown) => {
       assert.ok(e instanceof BatchError);
-      assert.equal(e.code, "BATCH_FAILED");
-      assert.match(e.message, /#0: missing url/);
+      assert.equal(e.code, "BATCH_INVALID_REQUEST");
+      assert.match(e.message, /#0: invalid_external_id/);
+      const j = e.toJSON();
+      assert.equal(j.server_code, "invalid_argument");
+      assert.deepEqual(j.invalid_tasks, [{ index: 0, reason: "invalid_external_id" }]);
       return true;
     }
   );
+});
+
+test("409 codes map to their own MCP codes", async () => {
+  const cases: Record<string, string> = {
+    run_not_stoppable: "BATCH_RUN_ENDED",
+    run_not_terminal: "BATCH_RUN_NOT_FINISHED",
+    no_matching_tasks: "BATCH_NO_MATCHING_TASKS",
+    partial_rerun_window_expired: "BATCH_RERUN_WINDOW_EXPIRED",
+    idempotency_key_conflict: "BATCH_IDEMPOTENCY_CONFLICT",
+    task_not_ready: "BATCH_TASK_NOT_READY",
+    no_prior_run: "BATCH_NO_PRIOR_RUN",
+    something_new: "BATCH_CONFLICT",
+  };
+  for (const [server, mcp] of Object.entries(cases)) {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ code: server, detail: "x" }), { status: 409 })) as typeof fetch;
+    await assert.rejects(
+      () => rerunJob("j", { apiKey: "k", fetchImpl }),
+      (e: unknown) => e instanceof BatchError && e.code === mcp && e.serverCode === server,
+      server
+    );
+  }
 });
 
 test("problem response that isn't valid JSON still produces a BatchError using the raw body as detail", async () => {
@@ -147,7 +207,7 @@ test("problem response that isn't valid JSON still produces a BatchError using t
     })) as typeof fetch;
 
   await assert.rejects(
-    () => getJob("job-1", { apiKey: "k", fetchImpl }),
+    () => createJob({}, { apiKey: "k", fetchImpl }),
     (e: unknown) => {
       assert.ok(e instanceof BatchError);
       assert.equal(e.code, "BATCH_FAILED");
@@ -163,7 +223,7 @@ test("a network failure (fetch throws) becomes BACKEND_UNAVAILABLE, not an uncau
   }) as typeof fetch;
 
   await assert.rejects(
-    () => getJob("job-1", { apiKey: "k", fetchImpl }),
+    () => stopJob("job-1", { apiKey: "k", fetchImpl }),
     (e: unknown) => {
       assert.ok(e instanceof BatchError);
       assert.equal(e.code, "BACKEND_UNAVAILABLE");
@@ -214,99 +274,6 @@ test("batchBase trims trailing slashes and defaults when the env override is uns
   }
 });
 
-test("listResults follows next_cursor across multiple pages and stops when it's null", async () => {
-  const seenCursors: Array<string | undefined> = [];
-  const pages: Record<string, { results: { task_id: string }[]; next_cursor: string | null }> = {
-    start: { results: [{ task_id: "a" }, { task_id: "b" }], next_cursor: "page2" },
-    page2: { results: [{ task_id: "c" }], next_cursor: null },
-  };
-
-  const fetchImpl = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input));
-    const cursor = url.searchParams.get("cursor") ?? "start";
-    seenCursors.push(url.searchParams.get("cursor") ?? undefined);
-    return new Response(JSON.stringify(pages[cursor]), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }) as typeof fetch;
-
-  const results = await listResults("job-1", { apiKey: "k", fetchImpl });
-  assert.deepEqual(
-    results.map((r) => r.task_id),
-    ["a", "b", "c"]
-  );
-  assert.deepEqual(seenCursors, [undefined, "page2"]);
-});
-
-test("waitForJob polls until a terminal status is reached", async () => {
-  let calls = 0;
-  const fetchImpl = (async () => {
-    calls += 1;
-    const status = calls < 3 ? "running" : "completed";
-    return new Response(
-      JSON.stringify({
-        job_id: "job-1",
-        latest_run: {
-          status,
-          stats: { total: 1, completed: calls >= 3 ? 1 : 0, successful: 0, failed: 0 },
-        },
-      }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
-  }) as typeof fetch;
-
-  const job = await waitForJob("job-1", { apiKey: "k", fetchImpl, pollTimeoutMs: 5000 });
-  assert.equal(job.latest_run.status, "completed");
-  assert.equal(calls, 3);
-});
-
-test("waitForJob raises BATCH_FAILED once the poll deadline passes without a terminal status", async () => {
-  const fetchImpl = (async () =>
-    new Response(
-      JSON.stringify({
-        job_id: "job-1",
-        latest_run: {
-          status: "running",
-          stats: { total: 1, completed: 0, successful: 0, failed: 0 },
-        },
-      }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    )) as typeof fetch;
-
-  await assert.rejects(
-    () => waitForJob("job-1", { apiKey: "k", fetchImpl, pollTimeoutMs: 1 }),
-    (e: unknown) => {
-      assert.ok(e instanceof BatchError);
-      assert.equal(e.code, "BATCH_FAILED");
-      assert.match(e.message, /Timed out/);
-      return true;
-    }
-  );
-});
-
-test("waitForJob returns on a failed run instead of polling to the deadline", async () => {
-  let calls = 0;
-  const fetchImpl = (async () => {
-    calls += 1;
-    return new Response(
-      JSON.stringify({
-        job_id: "job-1",
-        latest_run: {
-          status: "failed",
-          failure_reason: "api_key_cap_reached",
-          stats: { total: 2, completed: 1, successful: 1, failed: 0 },
-        },
-      }),
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
-  }) as typeof fetch;
-
-  const job = await waitForJob("job-1", { apiKey: "k", fetchImpl, pollTimeoutMs: 2000 });
-  assert.equal(job.latest_run.status, "failed");
-  assert.equal(calls, 1);
-});
-
 test("createJob maps 402 api_key_cap_reached to BATCH_KEY_CAP_REACHED, not out of credits", async () => {
   const fetchImpl = (async () =>
     new Response(
@@ -326,4 +293,283 @@ test("createJob maps 402 api_key_cap_reached to BATCH_KEY_CAP_REACHED, not out o
       !/no credit available/.test(e.message) &&
       /2026-10-03/.test(e.detail ?? "")
   );
+});
+
+const jsonRes = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+
+const run = (o: Record<string, unknown> = {}) => ({
+  run_id: "R1",
+  status: "running",
+  stats: { total: 2, completed: 0, successful: 0, failed: 0 },
+  ...o,
+});
+
+test("a create with an idempotency key retries a 503 with the same key, and a create without one never retries", async () => {
+  const keys: (string | null)[] = [];
+  const fetchImpl = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+    keys.push(new Headers(init?.headers).get("idempotency-key"));
+    return keys.length === 1 ? jsonRes({ code: "internal" }, 503) : jsonRes({ job_id: "J1", latest_run: run() }, 201);
+  }) as typeof fetch;
+  const job = await createJob({}, { apiKey: "k", fetchImpl, idempotencyKey: "key-1" });
+  assert.equal(job.job_id, "J1");
+  assert.deepEqual(keys, ["key-1", "key-1"]);
+
+  let calls = 0;
+  const failing = (async () => {
+    calls++;
+    return jsonRes({ code: "internal" }, 503);
+  }) as typeof fetch;
+  await assert.rejects(
+    () => createJob({}, { apiKey: "k", fetchImpl: failing }),
+    (e: unknown) => e instanceof BatchError
+  );
+  assert.equal(calls, 1);
+});
+
+test("a create never retries the 429 job limit, which carries no Retry-After", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return jsonRes({ code: "quota_exceeded" }, 429);
+  }) as typeof fetch;
+  await assert.rejects(
+    () => createJob({}, { apiKey: "k", fetchImpl, idempotencyKey: "x" }),
+    (e: unknown) => e instanceof BatchError && e.code === "BATCH_QUOTA_EXCEEDED"
+  );
+  assert.equal(calls, 1);
+});
+
+test("requests carry the extra headers, the API key and the user agent", async () => {
+  let seen: Headers | undefined;
+  const fetchImpl = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+    seen = new Headers(init?.headers);
+    return jsonRes({ job_id: "J1", latest_run: run() });
+  }) as typeof fetch;
+  await getJob("J1", {
+    apiKey: "k",
+    fetchImpl,
+    userAgent: "ua",
+    headers: { "x-mcp-client-name": "c", "x-mcp-tool": "batch_status" },
+  });
+  assert.equal(seen?.get("x-api-key"), "k");
+  assert.equal(seen?.get("x-mcp-client-name"), "c");
+  assert.equal(seen?.get("x-mcp-tool"), "batch_status");
+  assert.equal(seen?.get("user-agent"), "ua");
+});
+
+/** A results API with `pages` pages of `size` rows; cursors are page numbers. */
+function resultsApi(pages: number, size: number, seen: (string | null)[] = []) {
+  return (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    const c = url.searchParams.get("cursor");
+    seen.push(c);
+    const p = Number(c ?? 0);
+    const results = Array.from({ length: size }, (_, i) => ({ task_id: `T${p * size + i}` }));
+    return jsonRes({ results, next_cursor: p + 1 < pages ? String(p + 1) : null });
+  }) as typeof fetch;
+}
+
+test("readResults returns limit rows and a cursor that resumes mid-page without skipping or repeating", async () => {
+  const fetchImpl = resultsApi(3, 1000);
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  let calls = 0;
+  for (;;) {
+    const read = await readResults("J1", { apiKey: "k", fetchImpl, limit: 400, cursor });
+    calls++;
+    assert.ok(read.results.length <= 400);
+    ids.push(...read.results.map((r) => r.task_id));
+    if (read.next_cursor === null) break;
+    cursor = read.next_cursor;
+  }
+  assert.equal(ids.length, 3000);
+  assert.equal(new Set(ids).size, 3000);
+  assert.equal(ids[0], "T0");
+  assert.equal(ids[2999], "T2999");
+  assert.equal(calls, 8);
+});
+
+test("readResults defaults to 100 rows, never the whole job", async () => {
+  const read = await readResults("J1", { apiKey: "k", fetchImpl: resultsApi(10, 1000) });
+  assert.equal(read.results.length, 100);
+  assert.notEqual(read.next_cursor, null);
+});
+
+test("readResults stops after 10 pages of a sparse filter and hands back a cursor", async () => {
+  const read = await readResults("J1", { apiKey: "k", fetchImpl: resultsApi(50, 0), status: "processing", limit: 10 });
+  assert.equal(read.results.length, 0);
+  assert.equal(read.pages, 10);
+  assert.notEqual(read.next_cursor, null);
+});
+
+test("readResults sends the status filter and reads an explicit run", async () => {
+  let url = "";
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    url = String(input);
+    return jsonRes({ results: [], next_cursor: null });
+  }) as typeof fetch;
+  await readResults("J1", { apiKey: "k", fetchImpl, status: "processing", runId: "R0" });
+  assert.match(url, /\/jobs\/J1\/runs\/R0\/results\?status=processing$/);
+});
+
+test("a cursor this server did not make is INVALID_USAGE", () => {
+  assert.throws(
+    () => decodeResultsCursor("not-a-cursor"),
+    (e: unknown) => e instanceof BatchError && e.code === "INVALID_USAGE"
+  );
+});
+
+test("waitForJob returns the current state, not an error, when the wait runs out", async () => {
+  const fetchImpl = (async () => jsonRes({ job_id: "J1", latest_run: run() })) as typeof fetch;
+  const out = await waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 1, pollDelayMs: 50 });
+  assert.equal(out.timedOut, true);
+  assert.equal(out.job?.latest_run?.status, "running");
+});
+
+test("waitForJob returns at once on a paused run instead of polling to the deadline", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return jsonRes({ job_id: "J1", latest_run: run({ pause_state: "paused" }) });
+  }) as typeof fetch;
+  const t0 = Date.now();
+  const out = await waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 30 });
+  assert.equal(out.timedOut, false);
+  assert.equal(calls, 1);
+  assert.ok(Date.now() - t0 < 1000);
+});
+
+test("waitForJob does not treat pause_state left on a completed run as paused", async () => {
+  const fetchImpl = (async () =>
+    jsonRes({ job_id: "J1", latest_run: run({ status: "completed", pause_state: "paused" }) })) as typeof fetch;
+  const out = await waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 5 });
+  assert.equal(out.job?.latest_run?.status, "completed");
+});
+
+test("waitForJob polls through transient errors and returns on a terminal run", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    if (calls === 1) throw new TypeError("socket hang up");
+    if (calls === 2) return jsonRes({ code: "internal" }, 503);
+    return jsonRes({ job_id: "J1", latest_run: run({ status: calls < 4 ? "running" : "completed" }) });
+  }) as typeof fetch;
+  const polls: number[] = [];
+  const out = await waitForJob("J1", {
+    apiKey: "k",
+    fetchImpl,
+    timeout: 20,
+    pollDelayMs: 20,
+    onPoll: (_j, n) => void polls.push(n),
+  });
+  assert.equal(out.job?.latest_run?.status, "completed");
+  assert.equal(out.timedOut, false);
+  assert.ok(polls.length >= 1);
+});
+
+test("waitForJob ends at once on a 404", async () => {
+  const fetchImpl = (async () => jsonRes({ code: "not_found" }, 404)) as typeof fetch;
+  await assert.rejects(
+    () => waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 20 }),
+    (e: unknown) => e instanceof BatchError && e.code === "BATCH_NOT_FOUND"
+  );
+});
+
+test("waitForJob returns on a failed run instead of polling to the deadline", async () => {
+  let calls = 0;
+  const fetchImpl = (async () => {
+    calls++;
+    return jsonRes({ job_id: "J1", latest_run: run({ status: "failed", failure_reason: "api_key_cap_reached" }) });
+  }) as typeof fetch;
+  const out = await waitForJob("J1", { apiKey: "k", fetchImpl, timeout: 5 });
+  assert.equal(out.job?.latest_run?.status, "failed");
+  assert.equal(calls, 1);
+});
+
+test("runFailure gives each failure_reason the code of the matching HTTP error", () => {
+  assert.equal(runFailure("insufficient_credits").code, "BATCH_INSUFFICIENT_CREDITS");
+  assert.equal(runFailure("api_key_cap_reached").code, "BATCH_KEY_CAP_REACHED");
+  assert.equal(runFailure("subscription_inactive").code, "AUTH_INVALID");
+  assert.match(runFailure("subscription_inactive").advice, /billing/i);
+  assert.equal(runFailure("something_else").code, "BATCH_RUN_FAILED");
+  assert.equal(runFailure(undefined).code, "BATCH_RUN_FAILED");
+});
+
+test("getTaskContent reads a text body", async () => {
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    assert.match(String(input), /\/jobs\/J1\/tasks\/T1\/content$/);
+    return new Response("<html>hi</html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+  }) as typeof fetch;
+  const c = await getTaskContent("J1", "T1", { apiKey: "k", fetchImpl });
+  assert.deepEqual(c, { kind: "text", contentType: "text/html; charset=utf-8", body: "<html>hi</html>" });
+});
+
+test("getTaskContent does not read a binary body", async () => {
+  const fetchImpl = (async () =>
+    new Response(new Uint8Array([37, 80, 68, 70]), {
+      status: 200,
+      headers: { "content-type": "application/pdf", "content-length": "4" },
+    })) as typeof fetch;
+  const c = await getTaskContent("J1", "T1", { apiKey: "k", fetchImpl, runId: "R0" });
+  assert.deepEqual(c, { kind: "binary", contentType: "application/pdf", bytes: 4 });
+});
+
+test("getTaskContent follows a redirect to the presigned URL without the API key", async () => {
+  const calls: { url: string; key: string | null }[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), key: new Headers(init?.headers).get("x-api-key") });
+    if (calls.length === 1) {
+      assert.equal(init?.redirect, "manual");
+      return new Response(null, { status: 302, headers: { location: "https://s3.example/obj?sig=1" } });
+    }
+    return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+  }) as typeof fetch;
+  const c = await getTaskContent("J1", "T1", { apiKey: "k", fetchImpl });
+  assert.deepEqual(c, { kind: "binary", contentType: "application/pdf", resultUrl: "https://s3.example/obj?sig=1" });
+  assert.equal(calls[0]!.key, "k");
+  assert.equal(calls[1]!.key, null);
+});
+
+test("getTaskContent maps 410 to BATCH_RESULT_EXPIRED and 422 to BATCH_TASK_FAILED with the stored error", async () => {
+  const expired = (async () => jsonRes({ code: "result_expired", detail: "Result has expired" }, 410)) as typeof fetch;
+  await assert.rejects(
+    () => getTaskContent("J1", "T1", { apiKey: "k", fetchImpl: expired }),
+    (e: unknown) => e instanceof BatchError && e.code === "BATCH_RESULT_EXPIRED" && /14 days/.test(e.message)
+  );
+  const failed = (async () =>
+    jsonRes({ code: "RESP001", status: 422, detail: "Could not get content" }, 422)) as typeof fetch;
+  await assert.rejects(
+    () => getTaskContent("J1", "T1", { apiKey: "k", fetchImpl: failed }),
+    (e: unknown) =>
+      e instanceof BatchError &&
+      e.code === "BATCH_TASK_FAILED" &&
+      (e.toJSON().task_error as { code: string }).code === "RESP001"
+  );
+});
+
+test("rerunJob sends the status filter and the idempotency key; no filter is a full rerun", async () => {
+  const seen: { url: string; key: string | null; method?: string }[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({ url: String(input), key: new Headers(init?.headers).get("idempotency-key"), method: init?.method });
+    return jsonRes({ job_id: "J1", latest_run: run({ run_id: "R2" }), retried_tasks: 1, inherited_tasks: 1 }, 202);
+  }) as typeof fetch;
+  await rerunJob("J1", { apiKey: "k", fetchImpl, statuses: ["failed", "pending"], idempotencyKey: "rk" });
+  await rerunJob("J1", { apiKey: "k", fetchImpl });
+  assert.equal(seen[0]!.method, "POST");
+  assert.match(seen[0]!.url, /\/jobs\/J1\/rerun\?status=failed%2Cpending$/);
+  assert.equal(seen[0]!.key, "rk");
+  assert.match(seen[1]!.url, /\/jobs\/J1\/rerun$/);
+});
+
+test("deleteJob accepts an empty 202, and listJobs sends its filters", async () => {
+  const urls: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    urls.push(`${init?.method} ${String(input)}`);
+    return init?.method === "DELETE" ? new Response(null, { status: 202 }) : jsonRes({ jobs: [], next_cursor: null });
+  }) as typeof fetch;
+  await deleteJob("J1", { apiKey: "k", fetchImpl });
+  await listJobs({ apiKey: "k", fetchImpl, limit: 5, status: "closed", type: "regular", cursor: "c1" });
+  assert.match(urls[0]!, /^DELETE .*\/jobs\/J1$/);
+  assert.match(urls[1]!, /^GET .*\/jobs\?cursor=c1&limit=5&status=closed&type=regular$/);
 });
