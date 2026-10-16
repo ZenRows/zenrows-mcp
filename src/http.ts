@@ -199,9 +199,33 @@ app.all("/browser/*", async (c) => {
   return new Response(res.body, { status: res.status, headers: res.headers });
 });
 
+// Read-only discovery methods answered without a key, so registries and scanners can
+// see what the server offers. Anything else, tools/call included, still gets the 401
+// challenge, which is where an OAuth client starts sign-in.
+const PUBLIC_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+  "prompts/list",
+  "resources/list",
+  "resources/templates/list",
+]);
+
+async function isDiscoveryOnly(req: Request): Promise<boolean> {
+  if (req.method !== "POST") return false;
+  try {
+    const body = await req.clone().json();
+    const msgs = Array.isArray(body) ? body : [body];
+    return msgs.length > 0 && msgs.every((m) => typeof m?.method === "string" && PUBLIC_METHODS.has(m.method));
+  } catch {
+    return false;
+  }
+}
+
 app.all("/mcp", async (c) => {
-  const apiKey = extractApiKey(c.req.raw);
-  if (!apiKey) {
+  const apiKey = extractApiKey(c.req.raw) ?? ((await isDiscoveryOnly(c.req.raw)) ? "" : undefined);
+  if (apiKey === undefined) {
     return c.json(
       {
         error: "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.",

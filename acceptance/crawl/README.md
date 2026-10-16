@@ -79,7 +79,7 @@ and signal checks.
 | 17 | Naming | the API's operation and parameter names, in this surface's casing |
 | 18 | Copy | Crawl is "new", never "beta"; one "still evolving" line; the 429 limit reads as the account's active jobs, shared with Batch |
 | 19 | Failed crawl | an include pattern that matches nothing ends `failed` with `no_items_found`; SDKs return it, not raise it; MCP and CLI say `ok: false` (CLI: exit 1, `CRAWL_FAILED`) |
-| 20 | Results after stop | the html crawl is stopped while its pages are still being fetched: reading its results ends at once (MCP and CLI: `partial: false`, no note to call again), and the same URLs come back once the pages in flight finish |
+| 20 | Results after stop | the html crawl is stopped while its pages are still being fetched: reading its results loses no URL (MCP: `partial` follows the API's `next_cursor`, with a note to call again while it is set; CLI: `partial: false`), and the same URLs come back once the pages in flight finish |
 | 21 | Documented defaults | a create without `max_pages` and `max_items` gets the default the docs state (100) |
 
 Extra checks for this surface: `tools/list` shows exactly the eight `crawl_*` tools, only `crawl_stop` is destructive, and a default `crawl_content` output is at most 20,000 characters.
