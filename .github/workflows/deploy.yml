@@ -274,7 +274,16 @@ jobs:
               echo "The registry lists $NAME $VERSION"
               exit 0
             fi
-            ./mcp-publisher login github-oidc && ./mcp-publisher publish && exit 0
+            if ./mcp-publisher login github-oidc; then
+              out=$(./mcp-publisher publish 2>&1) && { echo "$out"; exit 0; }
+              echo "$out"
+              # A duplicate means the registry already holds this version: an
+              # earlier publish recorded it, though the check above missed it.
+              if grep -q "cannot publish duplicate version" <<<"$out"; then
+                echo "The registry already holds $NAME $VERSION"
+                exit 0
+              fi
+            fi
             echo "Publish try $i of 5 failed; next try in $((i * 30)) seconds"
             sleep $((i * 30))
           done
