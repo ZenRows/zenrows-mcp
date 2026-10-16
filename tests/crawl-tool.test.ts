@@ -102,17 +102,36 @@ test("crawl_create's description says an omitted depth means no depth limit, and
   assert.doesNotMatch(c.description, /default 10\)/);
 });
 
-test("crawl's descriptions say patterns filter what is returned and the pages opened to reach matches are billed", () => {
+test("crawl_create's description says a crawl whose patterns match nothing still bills the start page", () => {
+  const c = register().configs.crawl_create;
+  assert.match(c.description, /match\s+nothing still costs that one scrape/);
+});
+
+test("crawl's descriptions say 0 results with no error is a completed crawl, and to check the patterns", () => {
   const { configs } = register();
   const c = configs.crawl_create;
   const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
-  assert.match(c.description, /filter the URLs the crawl returns, not the pages it opens/);
-  assert.match(c.description, /each of those fetches is billed and counts\s+toward max_pages/);
-  assert.match(c.description, /match nothing ends completed with no results/);
-  assert.doesNotMatch(c.description, /still costs that one scrape/);
-  assert.match(String(shape.max_pages.description), /including pages opened only to reach URLs that match/);
-  assert.match(String(shape.include_patterns.description), /billed and count toward max_pages/);
-  assert.match(configs.crawl_get.description, /completed with no results while include_patterns/);
+  assert.match(c.description, /ends completed with no results\s+and no error/);
+  assert.match(c.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_get.description, /completed with no results and no error/);
+  assert.match(configs.crawl_get.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_wait.description, /completed with no results and no error finished; it is not a failure/);
+  for (const text of [
+    c.description,
+    configs.crawl_get.description,
+    String(shape.max_pages.description),
+    String(shape.include_patterns.description),
+    String(shape.exclude_patterns.description),
+  ]) {
+    assert.doesNotMatch(text, /not the pages it opens|opened only to reach|still opens|may still open/);
+  }
+});
+
+test("crawl_get's description gives no_items_found and seed_unreachable their meanings", () => {
+  const d = register().configs.crawl_get.description;
+  assert.match(d, /seed_unreachable means the start URL could not be fetched or returned an empty page/);
+  assert.match(d, /no_items_found means Extract read the start page and found no data on it/);
+  assert.doesNotMatch(d, /loosen them/);
 });
 
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
@@ -392,7 +411,7 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     error: {
       code: "no_items_found",
       detail:
-        "The crawl found no items: the pages it fetched held no links or listings it could follow. The site may have served a block or consent page, or a page that shows its links only to a browser; check the URL in a browser.",
+        "Extract read the start page and found no data on it, so the crawl had nothing to follow. Start from a page Extract reads, such as a listing or a product page.",
     },
   };
   for (const call of [
@@ -406,7 +425,27 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     assert.equal(body.crawl_id, "c_1");
     assert.equal(body.error.code, "CRAWL_FAILED");
     assert.equal(body.error.server_code, "no_items_found");
-    assert.match(body.error.message, /held no links or listings it could follow/);
+    assert.match(body.error.message, /Extract read the start page and found no data on it/);
+  }
+});
+
+test("a completed crawl with patterns and 0 results comes back ok: true with no error", async () => {
+  const { handlers } = register();
+  const empty = {
+    ...crawl("completed"),
+    include_patterns: ["/product/"],
+    coverage: { pages_fetched: 1, pages_failed: 0, items_found: 0 },
+  };
+  for (const call of [
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
+    () => handlers.crawl_get({ crawl_id: "c_1" }),
+  ]) {
+    const out = await withFetch(() => jsonResponse({ ...empty, results: [], next_cursor: null }), call);
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "completed");
+    assert.equal(body.crawl.coverage.items_found, 0);
+    assert.equal(body.error, undefined);
   }
 });
 
