@@ -130,8 +130,9 @@ test("crawl's descriptions say 0 results with no error is a completed crawl, and
 test("crawl_get's description gives no_items_found and seed_unreachable their meanings", () => {
   const d = register().configs.crawl_get.description;
   assert.match(d, /seed_unreachable means the start URL could not be fetched or returned an empty page/);
-  assert.match(d, /no_items_found means Extract read the start page and found no data on it/);
-  assert.doesNotMatch(d, /loosen them/);
+  assert.match(d, /no_items_found means the crawl read the start page but found no data it could use/);
+  assert.match(d, /start from a listing or product page/);
+  assert.doesNotMatch(d, /loosen them|Extract/);
 });
 
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
@@ -411,7 +412,7 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     error: {
       code: "no_items_found",
       detail:
-        "Extract read the start page and found no data on it, so the crawl had nothing to follow. Start from a page Extract reads, such as a listing or a product page.",
+        "The crawl read the start page but found no data it could use, so it had nothing to follow. Start from a listing or product page.",
     },
   };
   for (const call of [
@@ -425,7 +426,7 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     assert.equal(body.crawl_id, "c_1");
     assert.equal(body.error.code, "CRAWL_FAILED");
     assert.equal(body.error.server_code, "no_items_found");
-    assert.match(body.error.message, /Extract read the start page and found no data on it/);
+    assert.match(body.error.message, /found no data it could use/);
   }
 });
 

@@ -39,8 +39,8 @@ export interface Crawl {
   stop_reason?: string;
   /**
    * Set when the crawl failed or credits stopped it. `seed_unreachable`: the start URL could not be
-   * fetched or returned an empty page. `no_items_found`: Extract read the start page and found no
-   * data on it.
+   * fetched or returned an empty page. `no_items_found`: the crawl read the start page but found no
+   * data it could use.
    */
   error?: { code: string; detail: string };
   finished_at?: string;
