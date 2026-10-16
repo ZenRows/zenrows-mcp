@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "./auth/claim-hint.js";
 import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
+import { fetchWithRetry } from "./retry.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
@@ -256,13 +257,15 @@ Examples:
 
       let response: Response;
       try {
-        response = await fetch(`${ZENROWS_API_URL}?${searchParams}`, {
-          headers: {
-            "User-Agent": `zenrows/mcp ${pkg.version}`,
-            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-            "x-mcp-tool": "scrape",
-          },
-        });
+        response = await fetchWithRetry(() =>
+          fetch(`${ZENROWS_API_URL}?${searchParams}`, {
+            headers: {
+              "User-Agent": `zenrows/mcp ${pkg.version}`,
+              ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+              "x-mcp-tool": "scrape",
+            },
+          })
+        );
       } catch (err) {
         return {
           content: [
