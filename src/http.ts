@@ -1,5 +1,6 @@
 import { createRequire } from "module";
 import { timingSafeEqual } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
@@ -363,7 +364,7 @@ app.all("/mcp", async (c) => {
 
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless — no session tracking between requests
-    enableJsonResponse: true, // return JSON instead of SSE (simpler for Lambda + most MCP clients)
+    enableJsonResponse: true, // return JSON instead of SSE (simpler for the hosted runtime and most MCP clients)
   });
   const server = createServer(apiKey, c.req.raw.headers.get("user-agent") ?? undefined, { hosted: true });
   await server.connect(transport);
@@ -374,10 +375,10 @@ app.all("/mcp", async (c) => {
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-// ─── Lambda handler ───────────────────────────────────────────────────────────
-// Expects Lambda Function URL payload format v2.0 (also compatible with API Gateway HTTP API v2).
+// ─── hosted handler ───────────────────────────────────────────────────────────
+// Expects an HTTP API payload format v2.0 event.
 
-interface LambdaEvent {
+interface HostedEvent {
   requestContext: { http: { method: string } };
   rawPath: string;
   rawQueryString?: string;
@@ -386,7 +387,7 @@ interface LambdaEvent {
   isBase64Encoded?: boolean;
 }
 
-export const handler = async (event: LambdaEvent) => {
+export const handler = async (event: HostedEvent) => {
   const qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
   const url = `https://mcp.zenrows.com${event.rawPath}${qs}`;
   const method = event.requestContext.http.method;
@@ -414,7 +415,9 @@ export const handler = async (event: LambdaEvent) => {
 
 // ─── Local dev ────────────────────────────────────────────────────────────────
 
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+// Listen only when this file is run directly (npm run dev:http); importers such as
+// the hosted runtime and the tests just use the exported handler.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT) || 3000;
   serve({ fetch: app.fetch, port }, () => {
     process.stderr.write(`Zenrows MCP HTTP server listening on http://localhost:${port}/mcp\n`);

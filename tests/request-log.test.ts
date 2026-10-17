@@ -4,9 +4,7 @@ import { beforeEach, test } from "node:test";
 /**
  * The hosted server writes one JSON line per request. It must say what was asked and
  * how it went, and must never carry the key, the caller's IP, or tool arguments.
- * AWS_LAMBDA_FUNCTION_NAME keeps src/http.ts from starting its dev listener.
  */
-process.env.AWS_LAMBDA_FUNCTION_NAME = "test";
 
 const { handler, _setRequestLogSink } = await import("../src/http.ts");
 

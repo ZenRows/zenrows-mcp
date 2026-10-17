@@ -5,7 +5,6 @@ import { afterEach, test } from "node:test";
  * The hosting edge stamps X-Origin-Verify; with MCP_ORIGIN_SECRET set, anything without the
  * right value is refused before routing, well-known documents included.
  */
-process.env.AWS_LAMBDA_FUNCTION_NAME = "test";
 
 const { handler, _setRequestLogSink } = await import("../src/http.ts");
 
