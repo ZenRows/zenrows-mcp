@@ -1,7 +1,7 @@
 /**
  * Append a claim-account nudge when an unclaimed Free agent hits quota/plan limits.
  */
-import { readAccount } from "./ensure-key.js";
+import { isZenrowsHttpsUrl, readAccount } from "./ensure-key.js";
 
 const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
 
@@ -99,7 +99,8 @@ export function appendClaimHint(
   if (!isQuotaOrPlanError(probe)) return text;
 
   const acct = readAccount();
-  if (!acct?.unclaimed || !acct.claimUrl) return text;
+  // account.json is a local file; never echo a link into tool output unless it is ours.
+  if (!acct?.unclaimed || !isZenrowsHttpsUrl(acct.claimUrl)) return text;
 
   const hint = `${CLAIM_NUDGE}${acct.claimUrl}`;
   if (text.includes(acct.claimUrl) || text.includes(CLAIM_NUDGE.trim())) return text;

@@ -2,7 +2,7 @@ import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "./auth/claim-hint.js";
-import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
+import { getZenrowsDir, isZenrowsHttpsUrl, readAccount } from "./auth/ensure-key.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
@@ -412,7 +412,7 @@ function registerAccountResource(server: McpServer) {
         ? {
             accountId: acct.accountId,
             unclaimed: acct.unclaimed,
-            claimUrl: acct.claimUrl,
+            claimUrl: isZenrowsHttpsUrl(acct.claimUrl) ? acct.claimUrl : null,
             createdAt: acct.createdAt,
             zenrowsHome: home,
           }

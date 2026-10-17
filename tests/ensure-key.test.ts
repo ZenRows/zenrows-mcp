@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
@@ -7,8 +7,16 @@ import {
   AuthError,
   AUTO_SIGNUP_ENV,
   ENV_KEY,
+  TELEMETRY_ENV,
   ZENROWS_HOME_ENV,
   _resetDiscoveryCache,
+  detectClient,
+  discoverSignupUrl,
+  getOrCreateAgentId,
+  cliAgentIdPath,
+  isZenrowsHttpsUrl,
+  provisionMessage,
+  signupCandidates,
   ensureApiKey,
   resolveApiKey,
   signupAgent,
@@ -19,11 +27,21 @@ const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "zr-mcp-auth-"));
-  for (const k of [ENV_KEY, AUTO_SIGNUP_ENV, ZENROWS_HOME_ENV, "ZENROWS_AGENT_SIGNUP_URL"]) {
+  for (const k of [
+    ENV_KEY,
+    AUTO_SIGNUP_ENV,
+    ZENROWS_HOME_ENV,
+    TELEMETRY_ENV,
+    "ZENROWS_AGENT_SIGNUP_URL",
+    "ZENROWS_CONFIG_HOME",
+    "XDG_CONFIG_HOME",
+  ]) {
     saved[k] = process.env[k];
     delete process.env[k];
   }
   process.env[ZENROWS_HOME_ENV] = home;
+  // Keep the CLI's machine id file inside the temp home too.
+  process.env.XDG_CONFIG_HOME = join(home, "xdg");
   _resetDiscoveryCache();
 });
 
@@ -98,5 +116,142 @@ test("signupAgent maps 429 to SIGNUP_RATE_LIMITED", async () => {
       assert.equal(e.code, "SIGNUP_RATE_LIMITED");
       return true;
     }
+  );
+});
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+test("agent id is a random UUID persisted 0600 under ZENROWS_HOME and reused", () => {
+  const first = getOrCreateAgentId();
+  assert.match(first, UUID);
+  const file = join(home, ".zenrows", "telemetry-id");
+  assert.equal(readFileSync(file, "utf8").trim(), first);
+  if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal(getOrCreateAgentId(), first);
+});
+
+test("signup sends the stable agent id and the detected client", async () => {
+  process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
+  const seen: Record<string, string>[] = [];
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    seen.push(init.headers as Record<string, string>);
+    return new Response(JSON.stringify({ apiKey: "k", accountId: "a", claimUrl: "https://app.zenrows.com/claim/x" }), {
+      status: 201,
+    });
+  }) as unknown as typeof fetch;
+  await signupAgent({ fetchImpl });
+  await signupAgent({ fetchImpl });
+  assert.match(seen[0]["X-ZR-Agent-Id"], UUID);
+  assert.equal(seen[1]["X-ZR-Agent-Id"], seen[0]["X-ZR-Agent-Id"]);
+  assert.equal(seen[0]["X-ZR-Agent-Id"], readFileSync(join(home, ".zenrows", "telemetry-id"), "utf8").trim());
+  assert.equal(seen[0]["X-ZR-Client"], detectClient());
+  assert.equal(seen[0]["X-ZR-Source"], "mcp");
+});
+
+test("ZENROWS_TELEMETRY=off drops the attribution headers", async () => {
+  process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
+  process.env[TELEMETRY_ENV] = "off";
+  let headers: Record<string, string> = {};
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    headers = init.headers as Record<string, string>;
+    return new Response(JSON.stringify({ apiKey: "k", accountId: "a", claimUrl: "" }), { status: 201 });
+  }) as unknown as typeof fetch;
+  await signupAgent({ fetchImpl });
+  assert.equal(headers["X-ZR-Agent-Id"], undefined);
+  assert.equal(headers["X-ZR-Client"], undefined);
+});
+
+test("detectClient uses the CLI's vocabulary", () => {
+  assert.equal(detectClient({ CLAUDECODE: "1" }), "claude-code");
+  assert.equal(detectClient({ CURSOR_TRACE_ID: "x" }), "cursor");
+  assert.equal(detectClient({ CODEX_THREAD_ID: "x" }), "openai-codex");
+  assert.equal(detectClient({ TERM_PROGRAM: "vscode" }), "vscode");
+  assert.equal(detectClient({}), "unknown");
+});
+
+test("only https zenrows.com hosts count as ours", () => {
+  for (const ok of ["https://app.zenrows.com/api/agent/signup", "https://zenrows.com/x", "https://a.b.zenrows.com/"]) {
+    assert.equal(isZenrowsHttpsUrl(ok), true, ok);
+  }
+  for (const bad of [
+    "http://app.zenrows.com/api/agent/signup",
+    "https://evil.com/api/agent/signup",
+    "https://zenrows.com.evil.com/",
+    "https://evilzenrows.com/",
+    "https://app.zenrows.com@evil.com/",
+    "https://user:pw@app.zenrows.com/",
+    "javascript:alert(1)",
+    "",
+    42,
+  ]) {
+    assert.equal(isZenrowsHttpsUrl(bad), false, String(bad));
+  }
+});
+
+function discoveryReturning(endpoint: string): typeof fetch {
+  return (async () =>
+    new Response(JSON.stringify({ agent_auth: { signup_endpoint: endpoint } }), { status: 200 })) as typeof fetch;
+}
+
+test("discovery ignores a signup endpoint off zenrows.com", async () => {
+  const fetchImpl = discoveryReturning("https://attacker.example/signup");
+  assert.equal(await discoverSignupUrl({ fetchImpl }), null);
+  assert.deepEqual(await signupCandidates({ fetchImpl }), ["https://app.zenrows.com/api/agent/signup"]);
+});
+
+test("discovery keeps a zenrows.com signup endpoint", async () => {
+  const fetchImpl = discoveryReturning("https://api.zenrows.com/agent/signup");
+  assert.deepEqual(await signupCandidates({ fetchImpl }), [
+    "https://api.zenrows.com/agent/signup",
+    "https://app.zenrows.com/api/agent/signup",
+  ]);
+});
+
+test("a non-zenrows claim link from signup is not persisted", async () => {
+  process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
+  const fetchImpl = (async () =>
+    new Response(JSON.stringify({ apiKey: "k", accountId: "a", claimUrl: "https://phish.example/claim" }), {
+      status: 201,
+    })) as typeof fetch;
+  const r = await ensureApiKey({ fetchImpl });
+  assert.equal(r.provisioned?.claimUrl, "");
+});
+
+test("CLI id path follows ZENROWS_CONFIG_HOME, then XDG_CONFIG_HOME, like the CLI", () => {
+  assert.equal(cliAgentIdPath(), join(home, "xdg", "zenrows", "telemetry-id"));
+  process.env.ZENROWS_CONFIG_HOME = join(home, "cfg");
+  assert.equal(cliAgentIdPath(), join(home, "cfg", "telemetry-id"));
+});
+
+test("an existing CLI machine id is reused, so the machine has one id", () => {
+  const cliId = "11111111-2222-4333-8444-555555555555";
+  mkdirSync(join(home, "xdg", "zenrows"), { recursive: true });
+  writeFileSync(join(home, "xdg", "zenrows", "telemetry-id"), cliId + "\n");
+  assert.equal(getOrCreateAgentId(), cliId);
+});
+
+test("a malformed CLI id is ignored in favour of ours", () => {
+  mkdirSync(join(home, "xdg", "zenrows"), { recursive: true });
+  writeFileSync(join(home, "xdg", "zenrows", "telemetry-id"), "not-a-uuid\n");
+  const ours = getOrCreateAgentId();
+  assert.match(ours, UUID);
+  assert.notEqual(ours, "not-a-uuid");
+});
+
+test("a new id is written where the CLI would look for it", () => {
+  const id = getOrCreateAgentId();
+  assert.equal(readFileSync(join(home, "xdg", "zenrows", "telemetry-id"), "utf8").trim(), id);
+});
+
+test("startup notice drops an untrusted or missing claim link and says how to get one", () => {
+  for (const claimUrl of ["", "https://phish.example/c"]) {
+    const msg = provisionMessage({ claimUrl }, "/h/.zenrows");
+    assert.ok(!msg.includes("phish"));
+    assert.ok(!/: \n/.test(msg), "no empty URL");
+    assert.match(msg, /POST https:\/\/app\.zenrows\.com\/api\/agent\/claim/);
+  }
+  assert.match(
+    provisionMessage({ claimUrl: "https://app.zenrows.com/claim/t" }, "/h"),
+    /keeps your usage\): https:\/\/app\.zenrows\.com\/claim\/t/
   );
 });
