@@ -362,6 +362,13 @@ app.all("/mcp", async (c) => {
     );
   }
 
+  // The hosted server is stateless and answers in JSON, so it has no stream to offer on
+  // GET. Answering 200 with an empty event stream makes clients reconnect immediately,
+  // forever. The spec's answer for "no stream here" is 405, which clients treat as final.
+  if (c.req.method === "GET") {
+    return c.json({ error: "This server does not offer a GET event stream. Use POST." }, 405, { Allow: "POST" });
+  }
+
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless — no session tracking between requests
     enableJsonResponse: true, // return JSON instead of SSE (simpler for the hosted runtime and most MCP clients)
