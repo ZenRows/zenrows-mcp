@@ -9,11 +9,7 @@ import { test } from "node:test";
  * resource has no scopes" rather than "nobody wrote them down", and the
  * authorization-server document omitted the field entirely. Both now name the one
  * scope the token really carries.
- *
- * Setting AWS_LAMBDA_FUNCTION_NAME before the import keeps src/http.ts from opening
- * a listener: the module starts a dev server when it thinks it is not on Lambda.
  */
-process.env.AWS_LAMBDA_FUNCTION_NAME = "test";
 
 const { handler } = await import("../src/http.ts");
 

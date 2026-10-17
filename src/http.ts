@@ -1,4 +1,6 @@
 import { createRequire } from "module";
+import { timingSafeEqual } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
@@ -11,6 +13,119 @@ const pkg = require("../package.json") as { version: string };
 // ─── app ──────────────────────────────────────────────────────────────────────
 
 const app = new Hono();
+
+// ─── request log ──────────────────────────────────────────────────────────────
+// One JSON line per request on stdout, picked up by the host's log collector. It records
+// what was asked of the server, never who asked or with what: no key (not even a
+// prefix), no IP, no tool arguments, no URLs being fetched.
+
+type AuthKind = "bearer" | "query" | "none";
+
+export interface RequestLogLine {
+  ts: string;
+  path: string;
+  http_method: string;
+  rpc_methods?: string[];
+  tool?: string[];
+  client_name?: string;
+  client_version?: string;
+  authenticated: boolean;
+  // OAuth clients send the access token as a Bearer header, and that token is the API
+  // key itself, so an OAuth connection and a pasted key look the same here: both "bearer".
+  auth_kind: AuthKind;
+  origin_verified: boolean;
+  status: number;
+  duration_ms: number;
+  user_agent?: string;
+}
+
+let logSink: (line: string) => void = (line) => process.stdout.write(line + "\n");
+
+/** Test-only: capture request log lines instead of writing them to stdout. */
+export function _setRequestLogSink(sink: (line: string) => void): void {
+  logSink = sink;
+}
+
+const MAX_FIELD = 128;
+const MAX_LOGGED_BODY = 64 * 1024;
+
+function short(v: unknown): string | undefined {
+  return typeof v === "string" && v ? v.slice(0, MAX_FIELD) : undefined;
+}
+
+function authKind(req: Request): AuthKind {
+  if (/^Bearer\s+\S/i.test(req.headers.get("authorization") ?? "")) return "bearer";
+  if (new URL(req.url).searchParams.get("apikey")) return "query";
+  return "none";
+}
+
+async function rpcSummary(req: Request): Promise<Partial<RequestLogLine>> {
+  if (req.method !== "POST") return {};
+  const len = Number(req.headers.get("content-length") ?? 0);
+  if (len > MAX_LOGGED_BODY) return {};
+  try {
+    const body = await req.clone().json();
+    const msgs = (Array.isArray(body) ? body : [body]).slice(0, 20);
+    const out: Partial<RequestLogLine> = { rpc_methods: [], tool: [] };
+    for (const m of msgs) {
+      const method = short(m?.method);
+      if (!method) continue;
+      out.rpc_methods!.push(method);
+      if (method === "tools/call") {
+        const name = short(m?.params?.name);
+        if (name) out.tool!.push(name);
+      }
+      if (method === "initialize") {
+        out.client_name = short(m?.params?.clientInfo?.name);
+        out.client_version = short(m?.params?.clientInfo?.version);
+      }
+    }
+    if (!out.tool!.length) delete out.tool;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The hosting edge adds X-Origin-Verify with a shared secret, so a request that
+ * reaches the server any other way is refused. Off when
+ * MCP_ORIGIN_SECRET is unset (local dev, tests). Read per request so tests can toggle it.
+ */
+function originVerified(req: Request): boolean {
+  const secret = process.env.MCP_ORIGIN_SECRET;
+  if (!secret) return true;
+  const got = Buffer.from(req.headers.get("x-origin-verify") ?? "");
+  const want = Buffer.from(secret);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
+app.use("*", async (c, next) => {
+  const started = Date.now();
+  const req = c.req.raw;
+  const kind = authKind(req);
+  const verified = originVerified(req);
+  const rpc = verified && c.req.path === "/mcp" ? await rpcSummary(req) : {};
+  if (verified) await next();
+  else c.res = c.json({ error: "Forbidden" }, 403);
+  const line: RequestLogLine = {
+    ts: new Date(started).toISOString(),
+    path: c.req.path.slice(0, MAX_FIELD),
+    http_method: req.method,
+    ...rpc,
+    authenticated: kind !== "none",
+    auth_kind: kind,
+    origin_verified: verified,
+    status: c.res.status,
+    duration_ms: Date.now() - started,
+    user_agent: short(req.headers.get("user-agent")),
+  };
+  try {
+    logSink(JSON.stringify(line));
+  } catch {
+    // logging must never fail a request
+  }
+});
 
 // CORS — required for browser-side MCP clients (Claude.ai, Cursor web, etc.)
 // All origins allowed: the API key is the auth mechanism, not the origin.
@@ -236,11 +351,11 @@ app.all("/mcp", async (c) => {
         // being asked for without a second fetch of the metadata document.
         // resource_metadata is the /mcp document: RFC 9728 §3.3 wants its `resource`
         // to equal the URL the client just called.
-        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(" ")}", resource_metadata="${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp"`,
-        // In production the Lambda Function URL renames this header to
-        // x-amzn-remapped-www-authenticate. CloudFront's response headers policy
-        // (iac-core-platform, 851-cloudfront-mcp.tf) drops that copy and sends a
-        // fixed WWW-Authenticate, so keep its value in step with this one.
+        "WWW-Authenticate": `Bearer realm="${AUTH_SERVER}", scope="${SCOPES_SUPPORTED.join(
+          " "
+        )}", resource_metadata="${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp"`,
+        // In production the hosting layer rewrites this header and the edge sends a
+        // fixed WWW-Authenticate instead, so keep that value in step with this one.
         // The Link header is a fallback for clients that ignore the challenge.
         Link: `<${MCP_SERVER}${PROTECTED_RESOURCE_PATH}/mcp>; rel="oauth-protected-resource"`,
       }
@@ -249,7 +364,7 @@ app.all("/mcp", async (c) => {
 
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless — no session tracking between requests
-    enableJsonResponse: true, // return JSON instead of SSE (simpler for Lambda + most MCP clients)
+    enableJsonResponse: true, // return JSON instead of SSE (simpler for the hosted runtime and most MCP clients)
   });
   const server = createServer(apiKey, c.req.raw.headers.get("user-agent") ?? undefined, { hosted: true });
   await server.connect(transport);
@@ -260,10 +375,10 @@ app.all("/mcp", async (c) => {
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-// ─── Lambda handler ───────────────────────────────────────────────────────────
-// Expects Lambda Function URL payload format v2.0 (also compatible with API Gateway HTTP API v2).
+// ─── hosted handler ───────────────────────────────────────────────────────────
+// Expects an HTTP API payload format v2.0 event.
 
-interface LambdaEvent {
+interface HostedEvent {
   requestContext: { http: { method: string } };
   rawPath: string;
   rawQueryString?: string;
@@ -272,7 +387,7 @@ interface LambdaEvent {
   isBase64Encoded?: boolean;
 }
 
-export const handler = async (event: LambdaEvent) => {
+export const handler = async (event: HostedEvent) => {
   const qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
   const url = `https://mcp.zenrows.com${event.rawPath}${qs}`;
   const method = event.requestContext.http.method;
@@ -300,7 +415,9 @@ export const handler = async (event: LambdaEvent) => {
 
 // ─── Local dev ────────────────────────────────────────────────────────────────
 
-if (!process.env.AWS_LAMBDA_FUNCTION_NAME) {
+// Listen only when this file is run directly (npm run dev:http); importers such as
+// the hosted runtime and the tests just use the exported handler.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT) || 3000;
   serve({ fetch: app.fetch, port }, () => {
     process.stderr.write(`Zenrows MCP HTTP server listening on http://localhost:${port}/mcp\n`);

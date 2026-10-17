@@ -141,3 +141,11 @@ test("a per-key credit cap is not a quota/plan error and gets the cap guidance, 
   assert.match(batchOut, /reached one of its credit caps/);
   assert.doesNotMatch(batchOut, /Claim your Free account/);
 });
+
+test("appendClaimHint never echoes a claim link that is not https on zenrows.com", () => {
+  for (const url of ["https://phish.example/claim/tok", "http://app.zenrows.com/claim/tok", "javascript:alert(1)"]) {
+    writeUnclaimed(url);
+    const out = appendClaimHint("HTTP 402", { status: 402 });
+    assert.equal(out, "HTTP 402", url);
+  }
+});

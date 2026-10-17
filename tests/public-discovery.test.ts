@@ -6,7 +6,6 @@ import { test } from "node:test";
  * scanners can list the tools, and keeps the 401 challenge on everything else, which
  * is what starts an OAuth client's sign-in.
  */
-process.env.AWS_LAMBDA_FUNCTION_NAME = "test";
 
 const { handler } = await import("../src/http.ts");
 

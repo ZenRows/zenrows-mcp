@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from "module";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { AuthError, ensureApiKey, getZenrowsDir, resolveApiKey } from "./auth/ensure-key.js";
+import { AuthError, ensureApiKey, getZenrowsDir, provisionMessage, resolveApiKey } from "./auth/ensure-key.js";
 import { createServer } from "./server.js";
 
 const require = createRequire(import.meta.url);
@@ -21,11 +21,7 @@ try {
   const resolved = await ensureApiKey({
     userAgent: `zenrows/mcp ${pkg.version}`,
     onProvision: (acct) => {
-      process.stderr.write(
-        `Created a Zenrows Free plan account.\n` +
-          `Claim it anytime (keeps your usage): ${acct.claimUrl}\n` +
-          `Key stored in ${getZenrowsDir()}/secrets.json\n`
-      );
+      process.stderr.write(provisionMessage(acct, getZenrowsDir()));
     },
   });
   apiKey = resolved.apiKey;
