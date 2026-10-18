@@ -295,6 +295,8 @@ test("clientFromName maps only exact known clientInfo names", () => {
   assert.equal(clientFromName("claude-ai"), undefined);
   assert.equal(clientFromName("my-claude-wrapper"), undefined);
   assert.equal(clientFromName(undefined), undefined);
+  for (const n of ["toString", "constructor", "__proto__", "hasOwnProperty"])
+    assert.equal(clientFromName(n), undefined, n);
 });
 
 test("signup falls back to env detection for an unknown clientInfo name", async () => {

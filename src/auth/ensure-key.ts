@@ -219,22 +219,24 @@ export function detectClient(env: Env = process.env): string {
  * Map the MCP clientInfo.name from the handshake onto the same vocabulary. Signup now runs
  * on the first tool call, after the handshake, so the client has already named itself.
  */
-const CLIENT_NAMES: Record<string, string> = {
-  "claude-code": "claude-code",
-  cursor: "cursor",
-  "cursor-vscode": "cursor",
-  "codex-mcp-client": "openai-codex",
-  "Visual Studio Code": "vscode",
-  windsurf: "windsurf",
-  "windsurf-client": "windsurf",
-};
+const CLIENT_NAMES = new Map<string, string>(
+  Object.entries({
+    "claude-code": "claude-code",
+    cursor: "cursor",
+    "cursor-vscode": "cursor",
+    "codex-mcp-client": "openai-codex",
+    "Visual Studio Code": "vscode",
+    windsurf: "windsurf",
+    "windsurf-client": "windsurf",
+  })
+);
 
 /**
  * Only exact clientInfo names we know; anything else (Claude Desktop's "claude-ai", say)
  * returns undefined so the caller falls back to detectClient(env).
  */
 export function clientFromName(name: string | undefined): string | undefined {
-  return name ? CLIENT_NAMES[name.trim()] : undefined;
+  return name ? CLIENT_NAMES.get(name.trim()) : undefined;
 }
 
 /**

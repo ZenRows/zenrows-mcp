@@ -521,3 +521,47 @@ test("account.json is replaced atomically: a symlink in its place is replaced, n
     []
   );
 });
+
+// ─── re-audit follow-ups ─────────────────────────────────────────────────────
+
+async function refreshWith(claim: Route): Promise<void> {
+  const { refreshClaimState } = await import("../src/auth/claim-refresh.ts");
+  writeAgentAccount({
+    claimUrl: "https://app.zenrows.com/claim/old",
+    createdAt: new Date(Date.now() - 26 * DAY).toISOString(),
+  });
+  routes["/api/agent/account"] = () => json(200, { claimed: false });
+  routes["/api/agent/claim"] = claim;
+  await refreshClaimState();
+}
+
+test("a minted link's issue time is when the server answered, not when the refresh began", async () => {
+  let answeredAt = 0;
+  await refreshWith(async () => {
+    await new Promise((r) => setTimeout(r, 40));
+    answeredAt = Date.now();
+    return json(200, { claimUrl: "https://app.zenrows.com/claim/new" });
+  });
+  assert.equal(readAcct().claimUrl, "https://app.zenrows.com/claim/new");
+  assert.ok(Date.parse(readAcct().claimUrlIssuedAt as string) >= answeredAt);
+});
+
+test("a link stored by another process with a later issue time wins over ours", async () => {
+  await refreshWith(() => {
+    writeAgentAccount({
+      claimUrl: "https://app.zenrows.com/claim/later",
+      createdAt: new Date(Date.now() - 26 * DAY).toISOString(),
+      claimUrlIssuedAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    return json(200, { claimUrl: "https://app.zenrows.com/claim/ours" });
+  });
+  assert.equal(readAcct().claimUrl, "https://app.zenrows.com/claim/later");
+});
+
+test("an account marked claimed by another process during the refresh stays claimed", async () => {
+  await refreshWith(() => {
+    writeAgentAccount({ unclaimed: false, claimUrl: "", createdAt: new Date().toISOString() });
+    return json(200, { claimUrl: "https://app.zenrows.com/claim/ours" });
+  });
+  assert.equal(readAcct().unclaimed, false);
+});

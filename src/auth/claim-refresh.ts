@@ -89,7 +89,8 @@ async function doRefresh(opts: RefreshOpts): Promise<AgentAccount | null> {
   // account.json describes the account behind secrets.json, which may differ from an env key.
   const key = readStoredApiKey() ?? opts.apiKey;
   if (!key) return acct;
-  const now = opts.now ?? Date.now();
+  const clock = () => opts.now ?? Date.now();
+  const now = clock();
   const fetchImpl = opts.fetchImpl ?? fetch;
   const headers = { Accept: "application/json", "X-API-Key": key, "User-Agent": "zenrows/mcp" };
   let changed = false;
@@ -122,7 +123,8 @@ async function doRefresh(opts: RefreshOpts): Promise<AgentAccount | null> {
     const r = await call(`${base}/api/agent/claim`, { method: "POST", headers }, fetchImpl);
     if (r?.status === 200 && isZenrowsHttpsUrl(r.json.claimUrl)) {
       acct.claimUrl = r.json.claimUrl;
-      acct.claimUrlIssuedAt = new Date(now).toISOString();
+      // The link's 30 days run from when the server minted it, not from when we asked.
+      acct.claimUrlIssuedAt = new Date(clock()).toISOString();
     } else if (r?.status === 409) {
       // already_claimed, or not an agent account: either way there is nothing to claim.
       acct.unclaimed = false;
@@ -130,11 +132,14 @@ async function doRefresh(opts: RefreshOpts): Promise<AgentAccount | null> {
   }
 
   if (changed) {
-    // Re-read right before writing: keep a link someone stored after ours was issued.
+    // Re-read right before writing: another process may have claimed the account or
+    // stored a newer link while we were waiting on the network.
     const latest = readAccount();
-    const ourIssued = claimLinkIssuedAt(acct) ?? 0;
-    if (latest?.unclaimed && acct.unclaimed && linkFresh(latest, now) && (claimLinkIssuedAt(latest) ?? 0) > ourIssued) {
-      acct = { ...acct, claimUrl: latest.claimUrl, claimUrlIssuedAt: latest.claimUrlIssuedAt };
+    if (latest) {
+      if (latest.unclaimed === false) acct = { ...acct, unclaimed: false };
+      const theirs = isZenrowsHttpsUrl(latest.claimUrl) ? (claimLinkIssuedAt(latest) ?? 0) : 0;
+      const ours = isZenrowsHttpsUrl(acct.claimUrl) ? (claimLinkIssuedAt(acct) ?? 0) : 0;
+      if (theirs > ours) acct = { ...acct, claimUrl: latest.claimUrl, claimUrlIssuedAt: latest.claimUrlIssuedAt };
     }
     writeAccount(acct);
   }
