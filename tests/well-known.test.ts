@@ -133,3 +133,17 @@ test("the authorization server advertises anonymous agent signup", async () => {
     docs: `${base}/agent-onboarding/auth.md`,
   });
 });
+
+test("the server card describes the server the way npm and the MCP Registry do", async () => {
+  const { description } = (await import("../package.json", { with: { type: "json" } })).default as {
+    description: string;
+  };
+
+  for (const path of ["/.well-known/mcp/server-card.json", "/.well-known/mcp.json"]) {
+    const { statusCode, json } = await get(path);
+    assert.equal(statusCode, 200, path);
+    assert.equal(json.description, description, path);
+    // Plugin directories read this card; the tool descriptions already avoid these words.
+    assert.doesNotMatch(String(json.description), /stealth|anti-?bot|bypass|protected/i, path);
+  }
+});
