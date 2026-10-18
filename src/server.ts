@@ -1,7 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { appendClaimHint, CLAIM_LINK_EXPIRED, hasClaimHint, stripClaimHint } from "./auth/claim-hint.js";
+import { appendClaimHint, claimLinkExpired, hasClaimHint, stripClaimHint } from "./auth/claim-hint.js";
 import { refreshClaimState, usableClaimUrl } from "./auth/claim-refresh.js";
 import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
 import { keyOf, type KeyRef } from "./auth/key-ref.js";
@@ -467,7 +467,7 @@ function registerAccountResource(server: McpServer, currentKey: () => string) {
             accountId: acct.accountId,
             unclaimed: acct.unclaimed,
             claimUrl,
-            ...(acct.unclaimed && !claimUrl ? { claimHelp: CLAIM_LINK_EXPIRED } : {}),
+            ...(acct.unclaimed && !claimUrl ? { claimHelp: claimLinkExpired() } : {}),
             claimUrlIssuedAt: acct.claimUrlIssuedAt ?? acct.createdAt,
             createdAt: acct.createdAt,
             zenrowsHome: home,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import { appendClaimHint, CLAIM_LINK_EXPIRED, isQuotaOrPlanError } from "../src/auth/claim-hint.ts";
+import { appendClaimHint, claimLinkExpired, isQuotaOrPlanError } from "../src/auth/claim-hint.ts";
 
 let home: string;
 let savedHome: string | undefined;
@@ -147,7 +147,7 @@ test("appendClaimHint never echoes a claim link that is not https on zenrows.com
     writeUnclaimed(url);
     const out = appendClaimHint("HTTP 402", { status: 402 });
     assert.ok(!out.includes(url), url);
-    assert.ok(out.includes(CLAIM_LINK_EXPIRED), url);
+    assert.ok(out.includes(claimLinkExpired()), url);
   }
 });
 

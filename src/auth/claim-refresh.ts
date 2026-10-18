@@ -9,14 +9,7 @@
  *   than CLAIM_RETRY_GAP).
  * Every network failure is swallowed: the hint falls back to what account.json holds.
  */
-import {
-  CLAIM_API_URL,
-  DISCOVERY_URL_ENV,
-  isZenrowsHttpsUrl,
-  readAccount,
-  readStoredApiKey,
-  writeAccount,
-} from "./ensure-key.js";
+import { agentAppBase, isZenrowsHttpsUrl, readAccount, readStoredApiKey, writeAccount } from "./ensure-key.js";
 import type { AgentAccount } from "./ensure-key.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -25,11 +18,6 @@ export const LINK_REFRESH_AGE_MS = 25 * DAY;
 export const STATUS_TTL_MS = 6 * 60 * 60 * 1000;
 export const CLAIM_RETRY_GAP_MS = 60 * 60 * 1000;
 const TIMEOUT_MS = 5000;
-
-function appBase(): string {
-  const override = process.env[DISCOVERY_URL_ENV]?.trim();
-  return (override || new URL(CLAIM_API_URL).origin).replace(/\/$/, "");
-}
 
 function ms(iso: string | undefined): number | undefined {
   if (!iso) return undefined;
@@ -73,10 +61,30 @@ async function call(
  * Bring account.json up to date for an unclaimed account. Returns the account as it now
  * stands (or null when there is no local account). Never throws.
  */
-export async function refreshClaimState(
-  opts: { apiKey?: string; fetchImpl?: typeof fetch; now?: number } = {}
-): Promise<AgentAccount | null> {
-  const acct = readAccount();
+type RefreshOpts = { apiKey?: string; fetchImpl?: typeof fetch; now?: number };
+
+let inflight: Promise<AgentAccount | null> | undefined;
+
+/**
+ * One refresh at a time per process: parallel quota errors would otherwise each mint a
+ * link, each killing the one before, and the last write could store a dead one.
+ */
+export function refreshClaimState(opts: RefreshOpts = {}): Promise<AgentAccount | null> {
+  inflight ??= doRefresh(opts).finally(() => {
+    inflight = undefined;
+  });
+  return inflight;
+}
+
+function linkFresh(acct: AgentAccount, now: number): boolean {
+  const issued = claimLinkIssuedAt(acct);
+  return isZenrowsHttpsUrl(acct.claimUrl) && issued !== undefined && now - issued < LINK_REFRESH_AGE_MS;
+}
+
+async function doRefresh(opts: RefreshOpts): Promise<AgentAccount | null> {
+  const base = agentAppBase();
+  let acct = readAccount();
+  if (!base) return acct;
   if (!acct?.unclaimed) return acct;
   // account.json describes the account behind secrets.json, which may differ from an env key.
   const key = readStoredApiKey() ?? opts.apiKey;
@@ -88,7 +96,7 @@ export async function refreshClaimState(
 
   const checked = ms(acct.statusCheckedAt);
   if (checked === undefined || now - checked >= STATUS_TTL_MS) {
-    const r = await call(`${appBase()}/api/agent/account`, { method: "GET", headers }, fetchImpl);
+    const r = await call(`${base}/api/agent/account`, { method: "GET", headers }, fetchImpl);
     if (r?.status === 200) {
       acct.statusCheckedAt = new Date(now).toISOString();
       changed = true;
@@ -100,13 +108,18 @@ export async function refreshClaimState(
     }
   }
 
-  const issued = claimLinkIssuedAt(acct);
-  const linkStale = !isZenrowsHttpsUrl(acct.claimUrl) || issued === undefined || now - issued >= LINK_REFRESH_AGE_MS;
   const attempted = ms(acct.claimRefreshAttemptedAt);
-  if (linkStale && (attempted === undefined || now - attempted >= CLAIM_RETRY_GAP_MS)) {
+  if (!linkFresh(acct, now) && (attempted === undefined || now - attempted >= CLAIM_RETRY_GAP_MS)) {
+    // Another process may have stored a fresh link meanwhile; minting one would kill it.
+    const latest = readAccount();
+    if (latest && linkFresh(latest, now)) {
+      latest.statusCheckedAt = acct.statusCheckedAt ?? latest.statusCheckedAt;
+      if (changed) writeAccount(latest);
+      return latest;
+    }
     acct.claimRefreshAttemptedAt = new Date(now).toISOString();
     changed = true;
-    const r = await call(`${appBase()}/api/agent/claim`, { method: "POST", headers }, fetchImpl);
+    const r = await call(`${base}/api/agent/claim`, { method: "POST", headers }, fetchImpl);
     if (r?.status === 200 && isZenrowsHttpsUrl(r.json.claimUrl)) {
       acct.claimUrl = r.json.claimUrl;
       acct.claimUrlIssuedAt = new Date(now).toISOString();
@@ -116,6 +129,14 @@ export async function refreshClaimState(
     }
   }
 
-  if (changed) writeAccount(acct);
+  if (changed) {
+    // Re-read right before writing: keep a link someone stored after ours was issued.
+    const latest = readAccount();
+    const ourIssued = claimLinkIssuedAt(acct) ?? 0;
+    if (latest?.unclaimed && acct.unclaimed && linkFresh(latest, now) && (claimLinkIssuedAt(latest) ?? 0) > ourIssued) {
+      acct = { ...acct, claimUrl: latest.claimUrl, claimUrlIssuedAt: latest.claimUrlIssuedAt };
+    }
+    writeAccount(acct);
+  }
   return acct;
 }

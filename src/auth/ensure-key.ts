@@ -4,7 +4,7 @@
  * Persistence lives under ~/.zenrows/ (secrets.json + account.json, mode 0600).
  * Remote HTTP transport must NOT call this — Bearer/OAuth only.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -127,13 +127,21 @@ function readJsonFile<T>(file: string): T | null {
   }
 }
 
+/** Write via a 0600 temp file in the same dir and rename, so readers never see half a file. */
 function writeJsonSecure(file: string, data: unknown): void {
   ensureDir();
-  writeFileSync(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    chmodSync(file, 0o600);
-  } catch {
-    // best-effort on platforms without POSIX permissions
+    writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    try {
+      chmodSync(tmp, 0o600);
+    } catch {
+      // best-effort on platforms without POSIX permissions
+    }
+    renameSync(tmp, file);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
   }
 }
 
@@ -211,15 +219,22 @@ export function detectClient(env: Env = process.env): string {
  * Map the MCP clientInfo.name from the handshake onto the same vocabulary. Signup now runs
  * on the first tool call, after the handshake, so the client has already named itself.
  */
+const CLIENT_NAMES: Record<string, string> = {
+  "claude-code": "claude-code",
+  cursor: "cursor",
+  "cursor-vscode": "cursor",
+  "codex-mcp-client": "openai-codex",
+  "Visual Studio Code": "vscode",
+  windsurf: "windsurf",
+  "windsurf-client": "windsurf",
+};
+
+/**
+ * Only exact clientInfo names we know; anything else (Claude Desktop's "claude-ai", say)
+ * returns undefined so the caller falls back to detectClient(env).
+ */
 export function clientFromName(name: string | undefined): string | undefined {
-  const n = name?.toLowerCase() ?? "";
-  if (!n) return undefined;
-  if (n.includes("claude")) return "claude-code";
-  if (n.includes("cursor")) return "cursor";
-  if (n.includes("codex")) return "openai-codex";
-  if (n.includes("windsurf")) return "windsurf";
-  if (n.includes("vscode") || n.includes("visual studio code")) return "vscode";
-  return undefined;
+  return name ? CLIENT_NAMES[name.trim()] : undefined;
 }
 
 /**
@@ -387,11 +402,41 @@ export async function ensureApiKey(
 
 export const CLAIM_API_URL = "https://app.zenrows.com/api/agent/claim";
 
+function isLoopbackUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return (
+      (u.protocol === "http:" || u.protocol === "https:") &&
+      ["127.0.0.1", "localhost", "[::1]"].includes(u.hostname.toLowerCase())
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Origin of the app endpoints that take the API key (claim, account status). Defaults to
+ * production. A ZENROWS_DISCOVERY_URL override is honoured only for https zenrows.com hosts
+ * or loopback (local stubs); any other override returns undefined so the key is never sent.
+ */
+export function agentAppBase(): string | undefined {
+  const override = process.env[DISCOVERY_URL_ENV]?.trim();
+  if (!override) return new URL(CLAIM_API_URL).origin;
+  if (!isZenrowsHttpsUrl(override) && !isLoopbackUrl(override)) return undefined;
+  return new URL(override).origin;
+}
+
+/** The claim endpoint to tell a human about, from the same base as the requests. */
+export function claimApiUrl(): string {
+  const base = agentAppBase();
+  return base ? `${base}/api/agent/claim` : CLAIM_API_URL;
+}
+
 /** Stderr notice after auto-signup. Never prints a claim link we would not trust. */
 export function provisionMessage(acct: Pick<AgentAccount, "claimUrl">, dir: string): string {
   const claim = isZenrowsHttpsUrl(acct.claimUrl)
     ? `Claim it anytime (keeps your usage): ${acct.claimUrl}\n`
     : `Claim it anytime (keeps your usage): request a claim link with\n` +
-      `  curl -X POST ${CLAIM_API_URL} -H "X-API-Key: <key from ${dir}/secrets.json>"\n`;
+      `  curl -X POST ${claimApiUrl()} -H "X-API-Key: <key from ${dir}/secrets.json>"\n`;
   return `Created a Zenrows Free plan account.\n` + claim + `Key stored in ${dir}/secrets.json\n`;
 }

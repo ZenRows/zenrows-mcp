@@ -11,6 +11,7 @@ import {
   ZENROWS_HOME_ENV,
   _resetDiscoveryCache,
   detectClient,
+  clientFromName,
   discoverSignupUrl,
   getOrCreateAgentId,
   cliAgentIdPath,
@@ -35,6 +36,8 @@ beforeEach(() => {
     "ZENROWS_AGENT_SIGNUP_URL",
     "ZENROWS_CONFIG_HOME",
     "XDG_CONFIG_HOME",
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
   ]) {
     saved[k] = process.env[k];
     delete process.env[k];
@@ -281,4 +284,27 @@ test("startup notice drops an untrusted or missing claim link and says how to ge
     provisionMessage({ claimUrl: "https://app.zenrows.com/claim/t" }, "/h"),
     /keeps your usage\): https:\/\/app\.zenrows\.com\/claim\/t/
   );
+});
+
+test("clientFromName maps only exact known clientInfo names", () => {
+  assert.equal(clientFromName("claude-code"), "claude-code");
+  assert.equal(clientFromName("cursor-vscode"), "cursor");
+  assert.equal(clientFromName("codex-mcp-client"), "openai-codex");
+  assert.equal(clientFromName("Visual Studio Code"), "vscode");
+  assert.equal(clientFromName("windsurf-client"), "windsurf");
+  assert.equal(clientFromName("claude-ai"), undefined);
+  assert.equal(clientFromName("my-claude-wrapper"), undefined);
+  assert.equal(clientFromName(undefined), undefined);
+});
+
+test("signup falls back to env detection for an unknown clientInfo name", async () => {
+  process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
+  const seen: Record<string, string>[] = [];
+  const fetchImpl = (async (_u: unknown, init?: RequestInit) => {
+    seen.push(init?.headers as Record<string, string>);
+    return new Response(JSON.stringify({ apiKey: "k", accountId: "a", claimUrl: "" }), { status: 201 });
+  }) as typeof fetch;
+  await signupAgent({ fetchImpl, clientName: "claude-ai" });
+  assert.notEqual(seen[0]["X-ZR-Client"], "claude-code");
+  assert.equal(seen[0]["X-ZR-Client"], detectClient());
 });

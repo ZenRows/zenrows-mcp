@@ -2,14 +2,17 @@
  * Append a claim-account nudge when an unclaimed Free agent hits quota/plan limits.
  */
 import { usableClaimUrl } from "./claim-refresh.js";
-import { CLAIM_API_URL, readAccount } from "./ensure-key.js";
+import { claimApiUrl, readAccount } from "./ensure-key.js";
 
 const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
 
 /** Shown instead of a link once the stored one is past its 30-day life and no fresh one could be had. */
-export const CLAIM_LINK_EXPIRED =
-  `${CLAIM_NUDGE}the claim link expired. Request a new one with ` +
-  `curl -X POST ${CLAIM_API_URL} -H "X-API-Key: <your key>" and open the claimUrl it returns.`;
+export function claimLinkExpired(): string {
+  return (
+    `${CLAIM_NUDGE}the claim link expired. Request a new one with ` +
+    `curl -X POST ${claimApiUrl()} -H "X-API-Key: <your key>" and open the claimUrl it returns.`
+  );
+}
 
 export function hasClaimHint(text: string): boolean {
   return text.includes(`\n\n${CLAIM_NUDGE}`);
@@ -121,5 +124,5 @@ export function appendClaimHint(
   // and still alive.
   const url = usableClaimUrl(acct);
   if (url && text.includes(url)) return text;
-  return `${text}\n\n${url ? `${CLAIM_NUDGE}${url}` : CLAIM_LINK_EXPIRED}`;
+  return `${text}\n\n${url ? `${CLAIM_NUDGE}${url}` : claimLinkExpired()}`;
 }
