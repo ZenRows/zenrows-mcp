@@ -1,8 +1,10 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { appendClaimHint } from "./auth/claim-hint.js";
-import { getZenrowsDir, isZenrowsHttpsUrl, readAccount } from "./auth/ensure-key.js";
+import { appendClaimHint, CLAIM_LINK_EXPIRED, hasClaimHint, stripClaimHint } from "./auth/claim-hint.js";
+import { refreshClaimState, usableClaimUrl } from "./auth/claim-refresh.js";
+import { getZenrowsDir, readAccount } from "./auth/ensure-key.js";
+import { keyOf, type KeyRef } from "./auth/key-ref.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
@@ -88,9 +90,14 @@ export function buildScrapeParams(apiKey: string, params: ScrapeParams): URLSear
 export interface ServerOptions {
   /** Served over HTTP (hosted): tools that would write to this machine's disk answer differently. */
   hosted?: boolean;
+  /**
+   * stdio: resolve (or provision) the key before each tool call. Gets the MCP client's
+   * name; throws an error whose message is the tool error to return.
+   */
+  ensureKey?: (clientName?: string) => Promise<string>;
 }
 
-export function createServer(apiKey: string, clientName?: string, options: ServerOptions = {}): McpServer {
+export function createServer(apiKey: KeyRef, clientName?: string, options: ServerOptions = {}): McpServer {
   const server = new McpServer(
     {
       name: "zenrows",
@@ -102,6 +109,8 @@ export function createServer(apiKey: string, clientName?: string, options: Serve
   // Resolve client name: prefer explicit value (HTTP stateless path),
   // fall back to MCP handshake (stdio/persistent connection path).
   const getClientName = () => clientName ?? server.server.getClientVersion()?.name;
+
+  if (options.ensureKey) gateTools(server, options.ensureKey, getClientName, () => keyOf(apiKey));
 
   // ─── scrape ────────────────────────────────────────────────────────────────
 
@@ -252,7 +261,7 @@ Examples:
       },
     },
     async (params) => {
-      const searchParams = buildScrapeParams(apiKey, params);
+      const searchParams = buildScrapeParams(keyOf(apiKey), params);
 
       let response: Response;
       try {
@@ -391,12 +400,54 @@ Examples:
 
   // The handler re-reads disk so ZENROWS_HOME is visible. The account file lives on the user's machine. A hosted server would read its own
   // disk instead, which never holds the caller's account, so it does not offer this.
-  if (!options.hosted) registerAccountResource(server);
+  if (!options.hosted) registerAccountResource(server, () => keyOf(apiKey));
 
   return server;
 }
 
-function registerAccountResource(server: McpServer) {
+type ToolResult = { content?: Array<{ type: string; text?: string }>; isError?: boolean };
+
+/**
+ * Wrap every tool registered from here on: resolve the key first (a refused signup becomes
+ * the tool's error, and the server keeps running), and refresh claim state before a claim
+ * hint leaves the server, so the hint never carries a dead link or nags a claimed account.
+ */
+function gateTools(
+  server: McpServer,
+  ensureKey: (clientName?: string) => Promise<string>,
+  getClientName: () => string | undefined,
+  currentKey: () => string
+): void {
+  const register = server.registerTool.bind(server) as (...a: unknown[]) => unknown;
+  type Handler = (...args: unknown[]) => Promise<ToolResult> | ToolResult;
+  const wrapped = (name: unknown, config: unknown, cb: Handler) =>
+    register(name, config, async (...args: unknown[]) => {
+      try {
+        await ensureKey(getClientName());
+      } catch (err) {
+        return {
+          content: [{ type: "text" as const, text: err instanceof Error ? err.message : String(err) }],
+          isError: true,
+        };
+      }
+      const result = await cb(...args);
+      if (!result?.isError || !result.content?.some((c) => c.type === "text" && c.text && hasClaimHint(c.text))) {
+        return result;
+      }
+      await refreshClaimState({ apiKey: currentKey() });
+      return {
+        ...result,
+        content: result.content.map((c) => {
+          if (c.type !== "text" || !c.text || !hasClaimHint(c.text)) return c;
+          const base = stripClaimHint(c.text);
+          return { ...c, text: appendClaimHint(base, { status: 402, body: base, message: base }) };
+        }),
+      };
+    });
+  (server as unknown as { registerTool: typeof wrapped }).registerTool = wrapped;
+}
+
+function registerAccountResource(server: McpServer, currentKey: () => string) {
   server.registerResource(
     "zenrows-account",
     "zenrows://account",
@@ -406,13 +457,18 @@ function registerAccountResource(server: McpServer) {
       mimeType: "application/json",
     },
     async () => {
+      // Claimed elsewhere, or link past its life: fix account.json before reporting it.
+      if (readAccount()?.unclaimed) await refreshClaimState({ apiKey: currentKey() || undefined });
       const acct = readAccount();
       const home = getZenrowsDir();
+      const claimUrl = acct?.unclaimed ? (usableClaimUrl(acct) ?? null) : null;
       const body = acct
         ? {
             accountId: acct.accountId,
             unclaimed: acct.unclaimed,
-            claimUrl: isZenrowsHttpsUrl(acct.claimUrl) ? acct.claimUrl : null,
+            claimUrl,
+            ...(acct.unclaimed && !claimUrl ? { claimHelp: CLAIM_LINK_EXPIRED } : {}),
+            claimUrlIssuedAt: acct.claimUrlIssuedAt ?? acct.createdAt,
             createdAt: acct.createdAt,
             zenrowsHome: home,
           }

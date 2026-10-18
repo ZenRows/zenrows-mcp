@@ -24,6 +24,12 @@ export interface AgentAccount {
   unclaimed: boolean;
   claimUrl: string;
   createdAt: string;
+  /** When claimUrl was issued. Missing on files written before links were refreshed: createdAt stands in. */
+  claimUrlIssuedAt?: string;
+  /** Last successful claim-status check (GET /api/agent/account). */
+  statusCheckedAt?: string;
+  /** Last attempt to mint a fresh claim link, successful or not. Caps POST /api/agent/claim. */
+  claimRefreshAttemptedAt?: string;
 }
 
 export interface SignupResponse {
@@ -34,11 +40,45 @@ export interface SignupResponse {
 
 export class AuthError extends Error {
   code: string;
-  constructor(code: string, message: string) {
+  /** Seconds the server asked us to wait before signing up again (429 Retry-After). */
+  retryAfterSec?: number;
+  constructor(code: string, message: string, retryAfterSec?: number) {
     super(message);
     this.name = "AuthError";
     this.code = code;
+    this.retryAfterSec = retryAfterSec;
   }
+}
+
+/** Seconds from a Retry-After header (delta-seconds or HTTP date), or undefined. */
+export function parseRetryAfter(value: string | null | undefined, now = Date.now()): number | undefined {
+  if (!value) return undefined;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) return Number(v);
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return undefined;
+  return Math.max(0, Math.ceil((at - now) / 1000));
+}
+
+const CI_VARS = [
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "CIRCLECI",
+  "BUILDKITE",
+  "JENKINS_URL",
+  "TF_BUILD",
+  "TEAMCITY_VERSION",
+  "BITBUCKET_BUILD_NUMBER",
+  "TRAVIS",
+  "DRONE",
+  "CODEBUILD_BUILD_ID",
+];
+
+/** True when this process looks like it runs in a CI job, where every run starts with an empty home. */
+export function isCI(env: Env = process.env): boolean {
+  const ci = env.CI?.trim().toLowerCase();
+  if (ci && ci !== "false" && ci !== "0") return true;
+  return CI_VARS.some((k) => !!env[k]);
 }
 
 /** Override home for tests / custom installs (absolute path to the `.zenrows` dir parent, or the dir itself if it ends with `.zenrows`). */
@@ -97,6 +137,8 @@ function writeJsonSecure(file: string, data: unknown): void {
   }
 }
 
+type Env = Record<string, string | undefined>;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
@@ -143,25 +185,41 @@ function writeUuidFile(file: string, id: string): void {
   }
 }
 
-type Env = Record<string, string | undefined>;
-
 function hasPrefix(env: Env, prefix: string): boolean {
   return Object.keys(env).some((k) => k.startsWith(prefix));
 }
 
 /**
- * Best-effort guess at the agent hosting this process. Signup runs before the MCP
- * handshake, so clientInfo is not known yet. Mirrors the Zenrows CLI's detectClient so
- * the app sees one vocabulary: claude-code, cursor, openai-codex, windsurf, vscode, unknown.
+ * Best-effort guess at the agent hosting this process, from its environment. Mirrors the
+ * Zenrows CLI's detectClient so the app sees one vocabulary: claude-code, cursor,
+ * openai-codex, windsurf, vscode, unknown.
+ *
+ * Only variables the agent itself sets count. OPENAI_API_KEY, CODEX_HOME or a stray
+ * CLAUDE_* variable are set by users in plenty of shells that are not that agent.
  */
 export function detectClient(env: Env = process.env): string {
   const term = env.TERM_PROGRAM;
-  if (env.CLAUDECODE || hasPrefix(env, "CLAUDE_CODE") || hasPrefix(env, "CLAUDE_")) return "claude-code";
+  if (env.CLAUDECODE === "1" || env.CLAUDE_CODE_ENTRYPOINT) return "claude-code";
   if (env.CURSOR_TRACE_ID || hasPrefix(env, "CURSOR_") || term === "cursor") return "cursor";
-  if (hasPrefix(env, "OPENAI_") || hasPrefix(env, "CODEX_")) return "openai-codex";
+  if (env.CODEX_SANDBOX || env.CODEX_SANDBOX_NETWORK_DISABLED || env.CODEX_THREAD_ID) return "openai-codex";
   if (hasPrefix(env, "WINDSURF")) return "windsurf";
   if (term === "vscode" || hasPrefix(env, "VSCODE_")) return "vscode";
   return "unknown";
+}
+
+/**
+ * Map the MCP clientInfo.name from the handshake onto the same vocabulary. Signup now runs
+ * on the first tool call, after the handshake, so the client has already named itself.
+ */
+export function clientFromName(name: string | undefined): string | undefined {
+  const n = name?.toLowerCase() ?? "";
+  if (!n) return undefined;
+  if (n.includes("claude")) return "claude-code";
+  if (n.includes("cursor")) return "cursor";
+  if (n.includes("codex")) return "openai-codex";
+  if (n.includes("windsurf")) return "windsurf";
+  if (n.includes("vscode") || n.includes("visual studio code")) return "vscode";
+  return undefined;
 }
 
 /**
@@ -249,7 +307,7 @@ export async function signupCandidates(opts: { fetchImpl?: typeof fetch } = {}):
 }
 
 export async function signupAgent(
-  opts: { url?: string; fetchImpl?: typeof fetch; userAgent?: string } = {}
+  opts: { url?: string; fetchImpl?: typeof fetch; userAgent?: string; clientName?: string } = {}
 ): Promise<SignupResponse> {
   const urls = opts.url ? [opts.url] : await signupCandidates({ fetchImpl: opts.fetchImpl });
   const doFetch = opts.fetchImpl ?? fetch;
@@ -260,7 +318,8 @@ export async function signupAgent(
   };
   if (process.env[TELEMETRY_ENV] !== "off") {
     headers["X-ZR-Agent-Id"] = getOrCreateAgentId();
-    headers["X-ZR-Client"] = detectClient();
+    headers["X-ZR-Client"] = clientFromName(opts.clientName) ?? detectClient();
+    if (isCI()) headers["X-ZR-CI"] = "1";
   }
 
   let lastMessage = "No signup endpoint was reachable.";
@@ -277,8 +336,12 @@ export async function signupAgent(
     if (res.status === 429) {
       throw new AuthError(
         "SIGNUP_RATE_LIMITED",
-        "Zenrows blocked auto-signup: too many new accounts from this network. Wait and retry, or set ZENROWS_API_KEY."
+        "Zenrows refused to create another account: too many new accounts from this network.",
+        parseRetryAfter(res.headers.get("retry-after"))
       );
+    }
+    if (res.status === 503) {
+      throw new AuthError("SIGNUP_DISABLED", "Zenrows has automatic account creation turned off right now.");
     }
     lastMessage = `HTTP ${res.status}: ${body.slice(0, 240)}`;
   }
@@ -293,6 +356,7 @@ export async function ensureApiKey(
   opts: {
     fetchImpl?: typeof fetch;
     userAgent?: string;
+    clientName?: string;
     onProvision?: (a: AgentAccount) => void;
   } = {}
 ): Promise<{ apiKey: string; provisioned?: AgentAccount }> {
@@ -306,7 +370,7 @@ export async function ensureApiKey(
     );
   }
 
-  const res = await signupAgent({ fetchImpl: opts.fetchImpl, userAgent: opts.userAgent });
+  const res = await signupAgent({ fetchImpl: opts.fetchImpl, userAgent: opts.userAgent, clientName: opts.clientName });
   saveApiKey(res.apiKey);
   const account: AgentAccount = {
     accountId: res.accountId,
@@ -315,6 +379,7 @@ export async function ensureApiKey(
     claimUrl: isZenrowsHttpsUrl(res.claimUrl) ? res.claimUrl : "",
     createdAt: new Date().toISOString(),
   };
+  account.claimUrlIssuedAt = account.createdAt;
   writeAccount(account);
   opts.onProvision?.(account);
   return { apiKey: res.apiKey, provisioned: account };

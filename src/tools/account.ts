@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createRequire } from "module";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 
 const require = createRequire(import.meta.url);
@@ -82,7 +83,7 @@ export async function runAccountUsage(apiKey: string, opts: AccountOpts = {}) {
   }
 }
 
-export function registerAccountTools(server: McpServer, apiKey: string, opts: AccountOpts = {}): void {
+export function registerAccountTools(server: McpServer, apiKey: KeyRef, opts: AccountOpts = {}): void {
   server.registerTool(
     "account_usage",
     {
@@ -112,6 +113,6 @@ remaining_credits, resets_at, and unavailable (usage could not be read). Caps ar
 managed at https://app.zenrows.com/settings/api-keys.`,
       inputSchema: {},
     },
-    async () => runAccountUsage(apiKey, opts)
+    async () => runAccountUsage(keyOf(apiKey), opts)
   );
 }

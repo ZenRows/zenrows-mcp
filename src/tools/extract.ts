@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 
 const require = createRequire(import.meta.url);
@@ -279,7 +280,7 @@ function withoutNulls<T extends Record<string, unknown>>(params: T): WithoutNull
   return Object.fromEntries(Object.entries(params).filter(([, v]) => v !== null)) as WithoutNulls<T>;
 }
 
-export function registerExtractTool(server: McpServer, apiKey: string, getClientName: () => string | undefined): void {
+export function registerExtractTool(server: McpServer, apiKey: KeyRef, getClientName: () => string | undefined): void {
   server.registerTool(
     "extract",
     {
@@ -370,7 +371,7 @@ Full-page markdown, HTML and screenshots come from scrape.`,
       },
     },
     async (params) => {
-      const outcome = await runExtract(apiKey, withoutNulls(params), { getClientName });
+      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName });
       if (!outcome.ok) return err(outcome.errorText);
       return json({
         ok: true,

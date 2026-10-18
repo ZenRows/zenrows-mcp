@@ -114,8 +114,23 @@ test("signupAgent maps 429 to SIGNUP_RATE_LIMITED", async () => {
     (e: unknown) => {
       assert.ok(e instanceof AuthError);
       assert.equal(e.code, "SIGNUP_RATE_LIMITED");
+      assert.equal(e.retryAfterSec, undefined);
       return true;
     }
+  );
+});
+
+test("signupAgent carries Retry-After on 429 and maps 503 to SIGNUP_DISABLED", async () => {
+  process.env.ZENROWS_AGENT_SIGNUP_URL = "https://example.test/signup";
+  const limited = (async () => new Response("{}", { status: 429, headers: { "Retry-After": "90" } })) as typeof fetch;
+  await assert.rejects(
+    () => signupAgent({ fetchImpl: limited }),
+    (e: unknown) => e instanceof AuthError && e.retryAfterSec === 90
+  );
+  const off = (async () => new Response('{"error":"signup_disabled"}', { status: 503 })) as typeof fetch;
+  await assert.rejects(
+    () => signupAgent({ fetchImpl: off }),
+    (e: unknown) => e instanceof AuthError && e.code === "SIGNUP_DISABLED"
   );
 });
 
@@ -167,6 +182,18 @@ test("detectClient uses the CLI's vocabulary", () => {
   assert.equal(detectClient({ CODEX_THREAD_ID: "x" }), "openai-codex");
   assert.equal(detectClient({ TERM_PROGRAM: "vscode" }), "vscode");
   assert.equal(detectClient({}), "unknown");
+});
+
+test("detectClient ignores variables users set themselves", () => {
+  assert.equal(detectClient({ OPENAI_API_KEY: "sk-x" }), "unknown");
+  assert.equal(detectClient({ OPENAI_BASE_URL: "https://example.test" }), "unknown");
+  assert.equal(detectClient({ CODEX_HOME: "/h/.codex" }), "unknown");
+  assert.equal(detectClient({ CLAUDE_CONFIG_DIR: "/h/.claude", CLAUDE_MODEL: "x" }), "unknown");
+  assert.equal(detectClient({ CLAUDECODE: "0" }), "unknown");
+  assert.equal(detectClient({ CLAUDE_CODE_ENTRYPOINT: "cli" }), "claude-code");
+  assert.equal(detectClient({ CODEX_SANDBOX: "seatbelt" }), "openai-codex");
+  assert.equal(detectClient({ CODEX_SANDBOX_NETWORK_DISABLED: "1" }), "openai-codex");
+  assert.equal(detectClient({ OPENAI_API_KEY: "sk-x", CODEX_THREAD_ID: "t" }), "openai-codex");
 });
 
 test("only https zenrows.com hosts count as ours", () => {

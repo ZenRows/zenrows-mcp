@@ -36,7 +36,7 @@ function writeUnclaimed(claimUrl = "https://app.zenrows.com/claim/tok"): void {
       accountId: "acct-1",
       unclaimed: true,
       claimUrl,
-      createdAt: "2026-01-01T00:00:00.000Z",
+      createdAt: new Date().toISOString(),
     }) + "\n",
     { mode: 0o600 }
   );
