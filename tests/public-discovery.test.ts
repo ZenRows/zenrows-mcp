@@ -53,3 +53,23 @@ test("a GET or an unparsable body without a key gets the challenge", async () =>
   });
   assert.equal(garbled.statusCode, 401);
 });
+
+test("the keyless tools/call 401 tells a headless agent how to get a key", async () => {
+  const response = await post(rpc("tools/call", { name: "scrape", arguments: { url: "https://example.com" } }));
+  assert.equal(response.statusCode, 401);
+  const body = JSON.parse(response.body) as { error: string; agent_signup: string };
+  // Existing clients match on this prefix.
+  assert.ok(
+    body.error.startsWith("Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.")
+  );
+  assert.match(body.error, /POST https:\/\/app\.zenrows\.com\/api\/agent\/signup/);
+  assert.equal(body.agent_signup, "https://app.zenrows.com/api/agent/signup");
+  assert.equal(
+    response.headers["www-authenticate"],
+    'Bearer realm="https://app.zenrows.com", scope="api", resource_metadata="https://mcp.zenrows.com/.well-known/oauth-protected-resource/mcp"'
+  );
+  assert.equal(
+    response.headers.link,
+    '<https://mcp.zenrows.com/.well-known/oauth-protected-resource/mcp>; rel="oauth-protected-resource"'
+  );
+});

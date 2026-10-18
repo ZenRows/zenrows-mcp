@@ -204,6 +204,27 @@ function protectedResourceMetadata(resource: string) {
 app.get(PROTECTED_RESOURCE_PATH, (c) => c.json(protectedResourceMetadata(MCP_SERVER)));
 app.get(`${PROTECTED_RESOURCE_PATH}/mcp`, (c) => c.json(protectedResourceMetadata(MCP_ENDPOINT)));
 
+// Headless agents cannot complete an OAuth browser flow, so the authorization-server
+// document also advertises anonymous signup. Mirrors the agent_auth block the
+// dashboard publishes on its own well-known document; keep the two in step.
+const AGENT_SIGNUP_URL = `${AUTH_SERVER}/api/agent/signup`;
+
+function agentAuthMetadata() {
+  return {
+    signup_endpoint: AGENT_SIGNUP_URL,
+    signup_method: "POST",
+    requires_human: false,
+    register_uri: AGENT_SIGNUP_URL,
+    claim_uri: `${AUTH_SERVER}/api/agent/claim`,
+    identity_types_supported: ["anonymous"],
+    anonymous: { credential_types_supported: ["api_key"] },
+    claim_hint: "The created account is unclaimed; a human can claim it via the returned claimUrl.",
+    skill: `${AUTH_SERVER}/agent-onboarding/auth.md`,
+    playbook: `${AUTH_SERVER}/agent-onboarding/SKILL.md`,
+    docs: `${AUTH_SERVER}/agent-onboarding/auth.md`,
+  };
+}
+
 // RFC 8414 — OAuth Authorization Server Metadata
 // Issuer must match the URL of the server serving this document (MCP_SERVER, not AUTH_SERVER),
 // because the MCP server acts as an authorization server proxy for client discovery purposes.
@@ -218,6 +239,7 @@ app.get("/.well-known/oauth-authorization-server", (c) =>
     code_challenge_methods_supported: ["S256"],
     token_endpoint_auth_methods_supported: ["none"],
     scopes_supported: SCOPES_SUPPORTED,
+    agent_auth: agentAuthMetadata(),
   })
 );
 
@@ -343,7 +365,11 @@ app.all("/mcp", async (c) => {
   if (apiKey === undefined) {
     return c.json(
       {
-        error: "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param.",
+        error:
+          "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param. " +
+          `No key yet? A headless agent can POST ${AGENT_SIGNUP_URL} (anonymous, returns apiKey; per-network limits apply) ` +
+          "and retry with Authorization: Bearer <key>. Clients that support OAuth can sign in via resource_metadata in WWW-Authenticate.",
+        agent_signup: AGENT_SIGNUP_URL,
       },
       401,
       {
