@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { ZENROWS_HOME_ENV } from "../src/auth/ensure-key.ts";
-import { appendClaimHint, isQuotaOrPlanError } from "../src/auth/claim-hint.ts";
+import { appendClaimHint, claimLinkExpired, isQuotaOrPlanError } from "../src/auth/claim-hint.ts";
 
 let home: string;
 let savedHome: string | undefined;
@@ -22,14 +22,14 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function writeUnclaimed(claimUrl = "https://app.zenrows.com/claim/tok"): void {
+function writeUnclaimed(claimUrl = "https://app.zenrows.com/claim/tok", createdAt = new Date().toISOString()): void {
   writeFileSync(
     join(home, ".zenrows", "account.json"),
     JSON.stringify({
       accountId: "acct-1",
       unclaimed: true,
       claimUrl,
-      createdAt: "2026-01-01T00:00:00.000Z",
+      createdAt,
     }) + "\n",
     { mode: 0o600 }
   );
@@ -146,6 +146,15 @@ test("appendClaimHint never echoes a claim link that is not https on zenrows.com
   for (const url of ["https://phish.example/claim/tok", "http://app.zenrows.com/claim/tok", "javascript:alert(1)"]) {
     writeUnclaimed(url);
     const out = appendClaimHint("HTTP 402", { status: 402 });
-    assert.equal(out, "HTTP 402", url);
+    assert.ok(!out.includes(url), url);
+    assert.ok(out.includes(claimLinkExpired()), url);
   }
+});
+
+test("appendClaimHint drops a claim link past its 30-day life and says how to get a new one", () => {
+  const old = new Date(Date.now() - 31 * 24 * 3600 * 1000).toISOString();
+  writeUnclaimed("https://app.zenrows.com/claim/old", old);
+  const out = appendClaimHint("HTTP 402", { status: 402 });
+  assert.doesNotMatch(out, /claim\/old/);
+  assert.match(out, /api\/agent\/claim/);
 });

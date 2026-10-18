@@ -3,6 +3,7 @@ import { link, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { getZenrowsDir } from "../auth/ensure-key.js";
 import {
@@ -157,9 +158,14 @@ export interface CrawlToolOptions {
   downloadDir?: string;
 }
 
-export function registerCrawlTools(server: McpServer, apiKey: string, options: CrawlToolOptions = {}): void {
+export function registerCrawlTools(server: McpServer, apiKey: KeyRef, options: CrawlToolOptions = {}): void {
   const ua = `zenrows/mcp ${pkg.version}`;
-  const call = { apiKey, userAgent: ua };
+  const call = {
+    get apiKey() {
+      return keyOf(apiKey);
+    },
+    userAgent: ua,
+  };
   const downloadDir = options.downloadDir ?? join(getZenrowsDir(), "crawls");
 
   server.registerTool(

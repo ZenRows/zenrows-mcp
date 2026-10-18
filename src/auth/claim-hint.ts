@@ -1,9 +1,28 @@
 /**
  * Append a claim-account nudge when an unclaimed Free agent hits quota/plan limits.
  */
-import { isZenrowsHttpsUrl, readAccount } from "./ensure-key.js";
+import { usableClaimUrl } from "./claim-refresh.js";
+import { claimApiUrl, readAccount } from "./ensure-key.js";
 
 const CLAIM_NUDGE = "Claim your Free account to keep usage and upgrade: ";
+
+/** Shown instead of a link once the stored one is past its 30-day life and no fresh one could be had. */
+export function claimLinkExpired(): string {
+  return (
+    `${CLAIM_NUDGE}the claim link expired. Request a new one with ` +
+    `curl -X POST ${claimApiUrl()} -H "X-API-Key: <your key>" and open the claimUrl it returns.`
+  );
+}
+
+export function hasClaimHint(text: string): boolean {
+  return text.includes(`\n\n${CLAIM_NUDGE}`);
+}
+
+/** Remove a claim nudge this module appended, so it can be re-added from fresher state. */
+export function stripClaimHint(text: string): string {
+  const i = text.indexOf(`\n\n${CLAIM_NUDGE}`);
+  return i === -1 ? text : text.slice(0, i);
+}
 
 /**
  * Codes that are not an allowance problem, so a claim nudge would be noise.
@@ -99,10 +118,11 @@ export function appendClaimHint(
   if (!isQuotaOrPlanError(probe)) return text;
 
   const acct = readAccount();
-  // account.json is a local file; never echo a link into tool output unless it is ours.
-  if (!acct?.unclaimed || !isZenrowsHttpsUrl(acct.claimUrl)) return text;
-
-  const hint = `${CLAIM_NUDGE}${acct.claimUrl}`;
-  if (text.includes(acct.claimUrl) || text.includes(CLAIM_NUDGE.trim())) return text;
-  return `${text}\n\n${hint}`;
+  if (!acct?.unclaimed) return text;
+  if (text.includes(CLAIM_NUDGE.trim())) return text;
+  // account.json is a local file; never echo a link into tool output unless it is ours
+  // and still alive.
+  const url = usableClaimUrl(acct);
+  if (url && text.includes(url)) return text;
+  return `${text}\n\n${url ? `${CLAIM_NUDGE}${url}` : claimLinkExpired()}`;
 }

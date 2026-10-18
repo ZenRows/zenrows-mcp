@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { BatchError, createJob, getJob, listResults, stopJob, waitForJob } from "../batch-api.js";
 
@@ -91,9 +92,14 @@ const taskSchema = z.object({
     .describe("Per-task Zenrows scrape params (js_render, premium_proxy, extract, autoparse, …)"),
 });
 
-export function registerBatchTools(server: McpServer, apiKey: string): void {
+export function registerBatchTools(server: McpServer, apiKey: KeyRef): void {
   const ua = `zenrows/mcp ${pkg.version}`;
-  const call = { apiKey, userAgent: ua };
+  const call = {
+    get apiKey() {
+      return keyOf(apiKey);
+    },
+    userAgent: ua,
+  };
 
   server.registerTool(
     "batch_create",

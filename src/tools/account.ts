@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createRequire } from "module";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 
 const require = createRequire(import.meta.url);
@@ -12,7 +13,7 @@ const pkg = require("../../package.json") as { version: string };
  * Responses carry `X-Request-Cost` and `X-Request-Credits` — what a call *cost*, after
  * the fact — but no counterpart to `Concurrency-Limit` / `Concurrency-Remaining`, so an
  * agent could total its own spend and still not know the ceiling. It found out by
- * hitting a 402 telling it to buy a subscription (ACT-1581, ACT-1577).
+ * hitting a 402 telling it to buy a subscription.
  *
  * `/v1/subscriptions/self/details` has always had the answer. It does not count against
  * concurrency, which is what makes it safe to call before a batch or on a retry.
@@ -82,7 +83,7 @@ export async function runAccountUsage(apiKey: string, opts: AccountOpts = {}) {
   }
 }
 
-export function registerAccountTools(server: McpServer, apiKey: string, opts: AccountOpts = {}): void {
+export function registerAccountTools(server: McpServer, apiKey: KeyRef, opts: AccountOpts = {}): void {
   server.registerTool(
     "account_usage",
     {
@@ -112,6 +113,6 @@ remaining_credits, resets_at, and unavailable (usage could not be read). Caps ar
 managed at https://app.zenrows.com/settings/api-keys.`,
       inputSchema: {},
     },
-    async () => runAccountUsage(apiKey, opts)
+    async () => runAccountUsage(keyOf(apiKey), opts)
   );
 }
