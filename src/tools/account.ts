@@ -13,7 +13,7 @@ const pkg = require("../../package.json") as { version: string };
  * Responses carry `X-Request-Cost` and `X-Request-Credits` — what a call *cost*, after
  * the fact — but no counterpart to `Concurrency-Limit` / `Concurrency-Remaining`, so an
  * agent could total its own spend and still not know the ceiling. It found out by
- * hitting a 402 telling it to buy a subscription (ACT-1581, ACT-1577).
+ * hitting a 402 telling it to buy a subscription.
  *
  * `/v1/subscriptions/self/details` has always had the answer. It does not count against
  * concurrency, which is what makes it safe to call before a batch or on a retry.
