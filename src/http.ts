@@ -8,7 +8,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createServer } from "./server.js";
 
 const require = createRequire(import.meta.url);
-const pkg = require("../package.json") as { version: string };
+const pkg = require("../package.json") as { version: string; description: string };
 
 // ─── app ──────────────────────────────────────────────────────────────────────
 
@@ -250,8 +250,8 @@ function mcpServerCard() {
     $schema: "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
     name: "io.zenrows/mcp",
     version: pkg.version,
-    description:
-      "Zenrows MCP — scrape and extract from protected sites via Fetch (anti-bot bypass, JS rendering, proxies).",
+    // Same text as npm and the MCP Registry, so the three listings can't drift apart.
+    description: pkg.description,
     websiteUrl: "https://www.zenrows.com/mcp",
     remotes: [
       {
