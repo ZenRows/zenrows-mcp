@@ -115,3 +115,21 @@ test("the challenge on an unauthenticated call names the scope", async () => {
   assert.equal(json.resource, "https://mcp.zenrows.com/mcp");
   assert.equal(response.headers.link, `<${metadataUrl.href}>; rel="oauth-protected-resource"`);
 });
+
+test("the authorization server advertises anonymous agent signup", async () => {
+  const { json } = await get("/.well-known/oauth-authorization-server");
+  const base = "https://app.zenrows.com";
+  assert.deepEqual(json.agent_auth, {
+    signup_endpoint: `${base}/api/agent/signup`,
+    signup_method: "POST",
+    requires_human: false,
+    register_uri: `${base}/api/agent/signup`,
+    claim_uri: `${base}/api/agent/claim`,
+    identity_types_supported: ["anonymous"],
+    anonymous: { credential_types_supported: ["api_key"] },
+    claim_hint: "The created account is unclaimed; a human can claim it via the returned claimUrl.",
+    skill: `${base}/agent-onboarding/auth.md`,
+    playbook: `${base}/agent-onboarding/SKILL.md`,
+    docs: `${base}/agent-onboarding/auth.md`,
+  });
+});
