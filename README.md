@@ -29,6 +29,11 @@ The Zenrows MCP (Model Context Protocol) server is the standard way AI systems u
 
 Zenrows MCP supports two transport options. Both expose the same set of tools and capabilities. Pick the one that fits your client.
 
+**What works without a key:**
+
+- **Local (`npx @zenrows/mcp`):** no signup, no key. The first tool call creates a Free account (5,000 credits/month) that you can claim later, keeping the key and its usage. Opt out with `ZENROWS_AUTO_SIGNUP=false`. In CI, set `ZENROWS_API_KEY` as a secret or persist `ZENROWS_HOME` between runs.
+- **Remote (`https://mcp.zenrows.com/mcp`):** `initialize` and `tools/list` answer without a key; tool calls need one (OAuth in clients that support it, or a Bearer key). The remote server never creates accounts by itself. A headless agent can create a Free account with `POST https://app.zenrows.com/api/agent/signup` and use the returned `apiKey` as the Bearer token.
+
 ### Remote MCP server
 
 Use the hosted Zenrows MCP server when your AI application calls an LLM API directly. The server runs on Zenrows' infrastructure, so there is nothing to install, configure, or update.
@@ -49,7 +54,7 @@ Authorization: Bearer YOUR_ZENROWS_API_KEY
 
 Most MCP clients accept this through an `authorization` shorthand field on the tool config and forward it as the Bearer token automatically. Some clients use a free-form `headers` field instead. Either approach works.
 
-> Remote MCP does **not** auto-create accounts. Use OAuth “Create Free account” in the client, or pass an existing API key.
+> Remote MCP does **not** auto-create accounts. `initialize` and `tools/list` work without a key; a keyless tool call gets a 401 whose body names the signup endpoint (`agent_signup`). Use OAuth “Create Free account” in the client, pass an existing API key, or, from a headless agent, `POST https://app.zenrows.com/api/agent/signup` (anonymous, returns `apiKey`; per-network limits apply) and retry with `Authorization: Bearer <apiKey>`.
 
 #### Example: OpenAI Responses API
 
