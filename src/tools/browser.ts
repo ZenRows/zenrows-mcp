@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { browserFetch, browserError } from "./browser-fetch.js";
 
@@ -25,12 +26,12 @@ const sessionId = z.string().describe("Session ID returned by browser_navigate")
 
 export function registerBrowserTools(
   server: McpServer,
-  apiKey: string,
+  apiKey: KeyRef,
   browserUrl: string,
   getClientName: () => string | undefined
 ): void {
   const tfetch = (toolName: string) => (method: string, path: string, body?: unknown) =>
-    browserFetch(method, path, apiKey, browserUrl, body, getClientName(), toolName);
+    browserFetch(method, path, keyOf(apiKey), browserUrl, body, getClientName(), toolName);
 
   // ─── Session ─────────────────────────────────────────────────────────────
 

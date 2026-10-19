@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import {
   BatchError,
@@ -377,15 +378,19 @@ const RESULT_FACTS = `A result_url is presigned and expires after 2 hours: call 
 
 export function registerBatchTools(
   server: McpServer,
-  apiKey: string,
+  apiKey: KeyRef,
   getClientName: () => string | undefined = () => undefined
 ): void {
   const ua = `zenrows/mcp ${pkg.version}`;
-  /** Per-tool request options: the same client and tool headers scrape and extract send. */
+  /**
+   * Per-tool request options: the same client and tool headers scrape and extract send. Built at
+   * call time, so the key is the one the server holds when the tool runs (stdio may provision it
+   * after the tools are registered).
+   */
   const call = (tool: string): CallOpts => {
     const client = getClientName();
     return {
-      apiKey,
+      apiKey: keyOf(apiKey),
       userAgent: ua,
       headers: { ...(client ? { "x-mcp-client-name": client } : {}), "x-mcp-tool": tool },
     };

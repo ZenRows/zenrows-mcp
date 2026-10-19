@@ -817,3 +817,20 @@ test("batch_content on a binary result in a large run hands back lookup_cursor a
     }
   );
 });
+
+test("batch tools read the API key when they run, so a key the server gets later is the one sent", async () => {
+  const holder = { current: "" };
+  const handlers: Record<string, Handler> = {};
+  registerBatchTools(
+    { registerTool: (name: string, _c: Config, h: Handler) => void (handlers[name] = h) } as never,
+    holder
+  );
+  holder.current = "late-key";
+  await withFetch(
+    () => jsonRes({ job_id: "J1", latest_run: run() }),
+    async (seen) => {
+      await handlers.batch_status!({ job_id: "J1" });
+      assert.equal(seen[0]!.headers.get("x-api-key"), "late-key");
+    }
+  );
+});
