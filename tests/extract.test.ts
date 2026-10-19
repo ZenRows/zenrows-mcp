@@ -8,7 +8,7 @@ import { buildExtractParams, isEmptyData, registerExtractTool, runExtract, zrErr
 
 /** Minimal stand-in for McpServer#registerTool — captures the handler so we can call it directly. */
 function fakeServer() {
-  let handler: ((params: unknown) => Promise<unknown>) | undefined;
+  let handler: ((params: unknown, extra: { signal: AbortSignal }) => Promise<unknown>) | undefined;
   return {
     server: {
       registerTool: (_name: string, _config: unknown, h: typeof handler) => {
@@ -17,7 +17,8 @@ function fakeServer() {
     },
     call: (params: unknown) => {
       assert.ok(handler, "registerExtractTool never called server.registerTool");
-      return handler!(params);
+      // The SDK always passes the request's extra, with its cancel signal.
+      return handler!(params, { signal: new AbortController().signal });
     },
   };
 }

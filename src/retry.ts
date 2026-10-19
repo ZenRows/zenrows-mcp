@@ -1,67 +1,143 @@
-import { retryAfterMs, retryAfterSeconds } from "./crawl-api.js";
-
 /**
  * Retry for the Fetch API calls (scrape, extract). A 429, 502, 503 or 504 means the
- * request was not served and not charged, so it is safe to send again; so is a
- * network error, which never produced a response. Any other status is the answer.
+ * request was not served and not charged, so it is safe to send again. So is a
+ * connection failure that happened before the request was written. Any other status
+ * is the answer, and any other error is final: the server may have received the
+ * request and may still be working on it.
  */
 export const FETCH_RETRIES = 2;
 export const FETCH_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
 /** No retry starts once the next wait would take the call past this. */
 export const FETCH_RETRY_BUDGET_MS = 90_000;
+/** Environment variable that sets the retry count; 0 sends each call once. */
+export const FETCH_RETRIES_ENV = "ZENROWS_FETCH_RETRIES";
 const BASE_MS = 1_000;
 const FLOOR_MS = 250;
 const CAP_MS = 30_000;
 
-/** Full jitter: uniform between 250 ms and min(30 s, 1 s x 2^attempt). */
-export function fullJitterMs(attempt: number, random: () => number = Math.random): number {
-  const ceiling = Math.max(FLOOR_MS, Math.min(CAP_MS, BASE_MS * 2 ** attempt));
+/**
+ * Error codes (on a fetch error's `cause`) for a connection that failed before the
+ * request was written: refused, name resolution, unreachable network or host, and a
+ * connect timeout. A reset after sending, a header timeout or an abort is not here.
+ */
+const NOT_SENT_CODES: ReadonlySet<string> = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+/** Full jitter: uniform between 250 ms and max(250 ms, min(maxWaitMs, 1 s x 2^attempt)). */
+export function fullJitterMs(attempt: number, random: () => number = Math.random, maxWaitMs = CAP_MS): number {
+  const ceiling = Math.max(FLOOR_MS, Math.min(maxWaitMs, BASE_MS * 2 ** attempt));
   return FLOOR_MS + random() * (ceiling - FLOOR_MS);
 }
+
+/**
+ * Retry-After in milliseconds, or undefined when the header is not whole seconds.
+ * Only plain digits count; an HTTP date, a fraction, a sign or hex falls back to
+ * jitter. The value is clamped to [250 ms, 30 s].
+ */
+export function retryAfterHeaderMs(header: string | null | undefined): number | undefined {
+  const value = header?.trim();
+  if (!value || !/^\d+$/.test(value)) return undefined;
+  return Math.min(CAP_MS, Math.max(FLOOR_MS, Number(value) * 1000));
+}
+
+/** True when a fetch error shows the request was never written to the server. */
+export function failedBeforeSend(e: unknown): boolean {
+  const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;
+  return typeof code === "string" && NOT_SENT_CODES.has(code);
+}
+
+/** Reads the retry count from the environment: unset or blank means the default. */
+export function retriesFromEnv(value: string | undefined): number {
+  const trimmed = value?.trim();
+  if (!trimmed) return FETCH_RETRIES;
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${FETCH_RETRIES_ENV} must be a whole number of 0 or more (0 turns retries off), got "${value}"`);
+  }
+  return Number(trimmed);
+}
+
+const configuredRetries = retriesFromEnv(process.env[FETCH_RETRIES_ENV]);
 
 export interface RetryOptions {
   retries?: number;
   budgetMs?: number;
-  sleep?: (ms: number) => Promise<void>;
+  /** Start of the budget. A follow-up call that belongs to the same tool call passes the first call's start. */
+  startedAt?: number;
+  /** The caller's cancel signal. Once it aborts, no new attempt starts and the wait ends at once. */
+  signal?: AbortSignal;
+  /** Names the tool in the retry log line. */
+  label?: string;
+  /** Receives one line per retry. Defaults to stderr: stdout carries the stdio protocol. */
+  log?: (line: string) => void;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   now?: () => number;
   random?: () => number;
 }
 
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const defaultLog = (line: string) => void process.stderr.write(`${line}\n`);
 
-function isAbort(e: unknown): boolean {
-  return e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError");
+/** Waits ms, or rejects with the signal's reason as soon as it aborts. */
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /**
- * Calls doFetch, retrying a retryable status or a network error with full-jitter
- * backoff. Retry-After (capped at 30 s) replaces the backoff when the server sends
- * it. An abort or timeout is never retried: the server may still be working on it.
- * Returns the last response, or rethrows the last network error.
+ * Calls doFetch with the caller's signal, retrying a retryable status or a connection
+ * that failed before sending, with full-jitter backoff. A whole-seconds Retry-After
+ * replaces the backoff. No retry starts after the budget (90 s by default), and none
+ * starts once the signal aborts. Returns the last response, or rethrows the last error.
  */
-export async function fetchWithRetry(doFetch: () => Promise<Response>, opts: RetryOptions = {}): Promise<Response> {
-  const retries = opts.retries ?? FETCH_RETRIES;
+export async function fetchWithRetry(
+  doFetch: (signal?: AbortSignal) => Promise<Response>,
+  opts: RetryOptions = {}
+): Promise<Response> {
+  const retries = opts.retries ?? configuredRetries;
   const budgetMs = opts.budgetMs ?? FETCH_RETRY_BUDGET_MS;
-  const sleep = opts.sleep ?? defaultSleep;
+  const sleep = opts.sleep ?? abortableSleep;
   const now = opts.now ?? Date.now;
-  const start = now();
+  const log = opts.log ?? defaultLog;
+  const { signal } = opts;
+  const start = opts.startedAt ?? now();
   for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
     let res: Response | undefined;
     let err: unknown;
     try {
-      res = await doFetch();
+      res = await doFetch(signal);
     } catch (e) {
-      if (isAbort(e)) throw e;
+      if (signal?.aborted) throw signal.reason;
+      if (!failedBeforeSend(e)) throw e;
       err = e;
     }
     const retryable = res === undefined || FETCH_RETRY_STATUSES.has(res.status);
-    const delay = fullJitterMs(attempt, opts.random);
-    const wait = res ? retryAfterMs(retryAfterSeconds(res.headers.get("retry-after")), delay) : delay;
+    const wait = retryAfterHeaderMs(res?.headers.get("retry-after")) ?? fullJitterMs(attempt, opts.random);
     if (!retryable || attempt >= retries || now() - start + wait > budgetMs) {
       if (res) return res;
       throw err;
     }
     await res?.body?.cancel().catch(() => undefined);
-    await sleep(wait);
+    signal?.throwIfAborted();
+    const reason = res ? String(res.status) : String((err as { cause?: { code?: unknown } }).cause?.code);
+    log(
+      `zenrows-mcp: ${opts.label ?? "fetch"} got ${reason} on attempt ${attempt + 1} of ${retries + 1}; retrying in ${Math.round(wait)} ms`
+    );
+    await sleep(wait, signal);
   }
 }

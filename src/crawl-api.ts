@@ -174,7 +174,7 @@ function backoffMs(attempt: number): number {
 }
 
 /** Retry-After as delay-seconds or as an HTTP-date. */
-export function retryAfterSeconds(header: string | null | undefined): number | undefined {
+function retryAfterSeconds(header: string | null | undefined): number | undefined {
   if (!header) return undefined;
   const seconds = Number(header);
   if (Number.isFinite(seconds)) return seconds >= 0 ? seconds : undefined;
@@ -184,7 +184,7 @@ export function retryAfterSeconds(header: string | null | undefined): number | u
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function retryAfterMs(retryAfter: number | undefined, fallbackMs: number): number {
+function retryAfterMs(retryAfter: number | undefined, fallbackMs: number): number {
   return retryAfter !== undefined ? Math.min(retryAfter, MAX_RETRY_AFTER_SECONDS) * 1000 : fallbackMs;
 }
 

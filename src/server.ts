@@ -261,19 +261,23 @@ Examples:
           ),
       },
     },
-    async (params) => {
+    async (params, extra) => {
       const searchParams = buildScrapeParams(keyOf(apiKey), params);
 
       let response: Response;
       try {
-        response = await fetchWithRetry(() =>
-          fetch(`${ZENROWS_API_URL}?${searchParams}`, {
-            headers: {
-              "User-Agent": `zenrows/mcp ${pkg.version}`,
-              ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-              "x-mcp-tool": "scrape",
-            },
-          })
+        // extra.signal aborts when the client cancels or times out the call: stop retrying then.
+        response = await fetchWithRetry(
+          (signal) =>
+            fetch(`${ZENROWS_API_URL}?${searchParams}`, {
+              headers: {
+                "User-Agent": `zenrows/mcp ${pkg.version}`,
+                ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+                "x-mcp-tool": "scrape",
+              },
+              signal,
+            }),
+          { signal: extra.signal, label: "scrape" }
         );
       } catch (err) {
         return {

@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
+import { test, type TestContext } from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createServer } from "../src/server.ts";
+
+/**
+ * The scrape and extract tools through a real MCP client, with the API played by a
+ * local node:http server. Global fetch is redirected there; the request still goes
+ * through the real fetch, so cancellation and sockets behave as in production.
+ */
+async function harness(t: TestContext, handler: (req: http.IncomingMessage, res: http.ServerResponse) => void) {
+  const hits: number[] = [];
+  const t0 = Date.now();
+  const api = http.createServer((req, res) => {
+    hits.push(Date.now() - t0);
+    handler(req, res);
+  });
+  await new Promise<void>((r) => api.listen(0, "127.0.0.1", () => r()));
+  const base = `http://127.0.0.1:${(api.address() as AddressInfo).port}/v1/`;
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = ((u: RequestInfo | URL, init?: RequestInit) =>
+    realFetch(String(u).replace("https://api.zenrows.com/v1/", base), init)) as typeof fetch;
+  const stderr = t.mock.method(process.stderr, "write", () => true);
+
+  const server = createServer("k");
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test", version: "0.0.0" });
+  await client.connect(clientTransport);
+
+  t.after(async () => {
+    await client.close();
+    globalThis.fetch = realFetch;
+    api.closeAllConnections();
+    await new Promise<void>((r) => api.close(() => r()));
+  });
+  const retryLines = () =>
+    stderr.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.startsWith("zenrows-mcp:"));
+  return { client, hits, retryLines };
+}
+
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("scrape retries a 503 and returns the retry's page", async (t) => {
+  let n = 0;
+  const { client, hits, retryLines } = await harness(t, (_req, res) => {
+    if (n++ === 0) {
+      res.writeHead(503, { "retry-after": "0" }).end('{"code":"RESP009"}');
+    } else {
+      res.writeHead(200, { "content-type": "text/plain" }).end("page body");
+    }
+  });
+  const out = (await client.callTool({ name: "scrape", arguments: { url: "https://example.com" } })) as {
+    content: Array<{ text: string }>;
+    isError?: boolean;
+  };
+  assert.equal(out.isError, undefined);
+  assert.equal(out.content[0].text, "page body");
+  assert.equal(hits.length, 2);
+  assert.deepEqual(retryLines(), ["zenrows-mcp: scrape got 503 on attempt 1 of 3; retrying in 250 ms\n"]);
+});
+
+for (const tool of ["scrape", "extract"]) {
+  test(`${tool}: no request reaches the API after the client times out the call`, async (t) => {
+    const { client, hits } = await harness(t, (_req, res) => {
+      res.writeHead(503, { "retry-after": "1", "content-type": "application/json" }).end('{"code":"RESP009"}');
+    });
+    const c0 = Date.now();
+    await assert.rejects(
+      client.callTool({ name: tool, arguments: { url: "https://example.com" } }, undefined, { timeout: 300 }),
+      /timed out/i
+    );
+    const cancelledAt = Date.now() - c0;
+    // Without cancellation the retry would go out at about 1 s and the next at about 2 s.
+    await wait(2_500);
+    assert.equal(hits.length, 1, `requests at ${hits.join(", ")} ms; client cancelled at ${cancelledAt} ms`);
+  });
+}
+
+for (const tool of ["scrape", "extract"]) {
+  test(`${tool}: a client timeout closes the attempt that is still running`, async (t) => {
+    let closedAt: number | undefined;
+    const c0 = Date.now();
+    const { client, hits } = await harness(t, (req) => {
+      req.socket.on("close", () => void (closedAt = Date.now() - c0));
+    });
+    await assert.rejects(
+      client.callTool({ name: tool, arguments: { url: "https://example.com" } }, undefined, { timeout: 200 }),
+      /timed out/i
+    );
+    await wait(300);
+    assert.equal(hits.length, 1);
+    assert.ok(closedAt !== undefined && closedAt < 1_000, `connection closed at ${closedAt} ms`);
+  });
+}

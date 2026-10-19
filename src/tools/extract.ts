@@ -137,13 +137,14 @@ async function callZenrows(
   let response: Response;
   try {
     response = await fetchWithRetry(
-      () =>
+      (signal) =>
         fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
           headers: {
             "User-Agent": `zenrows/mcp ${pkg.version}`,
             ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
             "x-mcp-tool": "extract",
           },
+          signal,
         }),
       retry
     );
@@ -169,11 +170,19 @@ export async function runExtract(
     fetchImpl?: typeof fetch;
     /** Retry policy for the API calls; tests inject sleep and randomness here. */
     retry?: RetryOptions;
+    /** The MCP request's cancel signal: once it aborts, no retry or fallback request starts. */
+    signal?: AbortSignal;
   } = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const getClientName = options.getClientName ?? (() => undefined);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const retry = options.retry ?? {};
+  // One budget for the whole tool call: the autoparse fallback shares the first call's start.
+  const retry: RetryOptions = {
+    label: "extract",
+    signal: options.signal,
+    ...options.retry,
+    startedAt: options.retry?.startedAt ?? (options.retry?.now ?? Date.now)(),
+  };
   const mode: ExtractMode = params.mode ?? "auto";
 
   if (mode === "css" && !params.css_extractor) {
@@ -197,7 +206,13 @@ export async function runExtract(
   };
 
   let usedMode: ExtractMode = mode;
-  let result = await callZenrows(apiKey, buildExtractParams(apiKey, params.url, mode, opts), getClientName, fetchImpl, retry);
+  let result = await callZenrows(
+    apiKey,
+    buildExtractParams(apiKey, params.url, mode, opts),
+    getClientName,
+    fetchImpl,
+    retry
+  );
 
   let fellBackToAutoparse = false;
   if (
@@ -380,8 +395,8 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           ),
       },
     },
-    async (params) => {
-      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName });
+    async (params, extra) => {
+      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName, signal: extra.signal });
       if (!outcome.ok) return err(outcome.errorText);
       return json({
         ok: true,
