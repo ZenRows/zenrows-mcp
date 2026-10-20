@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendClaimHint } from "../auth/claim-hint.js";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 
 /**
  * Prepare a domain for Extract (`extract=auto`) and follow its progress.
@@ -344,7 +345,7 @@ export async function runPreparedDomainStatus(apiKey: string, rawDomain: string,
   };
 }
 
-export function registerPrepareTools(server: McpServer, apiKey: string): void {
+export function registerPrepareTools(server: McpServer, apiKey: KeyRef): void {
   server.registerTool(
     "prepare_domain",
     {
@@ -387,7 +388,7 @@ prepared and preparing again does not change that answer.`,
       },
     },
     async (params) => {
-      const outcome = await runPrepareDomain(apiKey, {
+      const outcome = await runPrepareDomain(keyOf(apiKey), {
         domain: params.domain,
         example_urls: params.example_urls,
         idempotency_key: params.idempotency_key ?? undefined,
@@ -416,7 +417,7 @@ extract again once status is "ready". Costs no credits.`,
       },
     },
     async (params) => {
-      const outcome = await runPreparedDomainStatus(apiKey, params.domain);
+      const outcome = await runPreparedDomainStatus(keyOf(apiKey), params.domain);
       return outcome.ok ? json(outcome.data) : err(outcome.error);
     }
   );

@@ -3,16 +3,19 @@ import { link, mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { getZenrowsDir } from "../auth/ensure-key.js";
 import {
   Crawl,
+  CRAWL_CREDIT_CODES,
   CrawlError,
   CrawlResult,
   CrawlStop,
   contentIdOf,
   crawlDownloadUrl,
   createCrawl,
+  creditError,
   CreateCrawlBody,
   DEFAULT_LIMIT,
   DEFAULT_WAIT_SECONDS,
@@ -86,19 +89,26 @@ function resultsNote(status: string, ended: boolean, full: boolean): string {
 
 /**
  * The one output shape of crawl_create, crawl_get, crawl_wait and crawl_stop. A crawl that
- * ended `failed` answers ok: false with an error naming its code, as the CLI does, so an agent
- * that reads only `ok` does not take a failed crawl for a finished one.
+ * ended `failed`, or `stopped` with an error (the account ran out of credits or the API key hit
+ * a credit cap), answers ok: false with an error naming its code, as the CLI does, so an agent
+ * that reads only `ok` does not take it for a finished one. A crawl the credits ended gets the
+ * code and advice of a create refused with 402, stopped or (on older deployments) failed;
+ * any other error is CRAWL_FAILED.
  */
 function crawlOut(
   crawl: CrawlStop,
   more: { note?: string; results?: CrawlResult[]; next_cursor?: string | null; first_urls?: string[] } = {}
 ): { content: TextContent[] } {
-  const failed = crawl.status === "failed";
+  const creditStop = crawl.status === "stopped" && !!crawl.error;
+  const failed = crawl.status === "failed" || creditStop;
+  const serverCode = crawl.error?.code;
+  const credit = serverCode && CRAWL_CREDIT_CODES.has(serverCode) ? creditError(serverCode) : undefined;
+  const what = `Crawl ${crawl.crawl_id} ${creditStop ? "stopped" : "failed"}${serverCode ? ` (${serverCode})` : ""}: ${crawl.error?.detail ?? "no reason given"}`;
   const error = failed
     ? {
-        code: "CRAWL_FAILED",
-        message: `Crawl ${crawl.crawl_id} failed${crawl.error?.code ? ` (${crawl.error.code})` : ""}: ${crawl.error?.detail ?? "no reason given"}`,
-        server_code: crawl.error?.code,
+        code: credit?.code ?? "CRAWL_FAILED",
+        message: credit ? `${what.replace(/\.\s*$/, "")}. ${credit.cause}. ${credit.advice}` : what,
+        server_code: serverCode,
         detail: crawl.error?.detail,
       }
     : undefined;
@@ -148,9 +158,14 @@ export interface CrawlToolOptions {
   downloadDir?: string;
 }
 
-export function registerCrawlTools(server: McpServer, apiKey: string, options: CrawlToolOptions = {}): void {
+export function registerCrawlTools(server: McpServer, apiKey: KeyRef, options: CrawlToolOptions = {}): void {
   const ua = `zenrows/mcp ${pkg.version}`;
-  const call = { apiKey, userAgent: ua };
+  const call = {
+    get apiKey() {
+      return keyOf(apiKey);
+    },
+    userAgent: ua,
+  };
   const downloadDir = options.downloadDir ?? join(getZenrowsDir(), "crawls");
 
   server.registerTool(
@@ -166,7 +181,10 @@ Each page fetched is billed as one scrape on this account; max_pages bounds the 
 crawl keeps following links until max_pages or max_items stops it or nothing is left to
 open, so set max_pages to what you are willing to spend. The start page itself is never
 a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
-nothing still costs that one scrape. Set output_format "html" to also store each kept URL's page,
+nothing still costs that one scrape. A crawl whose pages held nothing new to follow (no link,
+only links to other sites, or only links the patterns reject) ends completed with no results
+and no error. When patterns are set, check them against the URLs the start page links to.
+Set output_format "html" or "markdown" to also store each kept URL's page,
 then read it with crawl_content.
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
@@ -204,9 +222,18 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .nullish()
           .describe("Drop URLs containing any of these substrings, even if they match include_patterns"),
         output_format: z
-          .enum(["html"])
+          .enum(["html", "markdown"])
           .nullish()
-          .describe("'html' also stores each kept URL's page for crawl_content. Omit for URLs only."),
+          .describe(
+            "'html' or 'markdown' also stores each kept URL's page for crawl_content, as fetched or converted to Markdown. Omit for URLs only."
+          ),
+        discovery: z
+          .array(z.enum(["links"]))
+          .min(1)
+          .nullish()
+          .describe(
+            "How the crawl finds the URLs it follows on each page it walks. ['links'] follows the links in each page's HTML, and is what a crawl runs with when you omit this."
+          ),
         idempotency_key: z
           .string()
           .min(1)
@@ -224,6 +251,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       if (params.include_patterns?.length) body.include_patterns = params.include_patterns;
       if (params.exclude_patterns?.length) body.exclude_patterns = params.exclude_patterns;
       if (params.output_format) body.output_format = params.output_format;
+      if (params.discovery?.length) body.discovery = params.discovery;
 
       try {
         return crawlOut(await createCrawl(body, { ...call, idempotencyKey: params.idempotency_key ?? undefined }));
@@ -239,7 +267,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
       description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
 
-completed with stop_reason max_items / max_pages means a limit ended it; failed carries error.code and error.detail. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
+completed with stop_reason max_items / max_pages means a limit ended it; stopped with stop_reason user means crawl_stop ended it; stopped with no stop_reason and error.code insufficient_credits or api_key_cap_reached means the account ran out of credits or the API key hit a credit cap (the URLs kept before that stay readable); completed with no results and no error means the crawl's pages held nothing new to follow; when include_patterns / exclude_patterns are set, check them against the URLs the start page links to. failed carries error.code and error.detail: seed_unreachable means the start URL could not be fetched or returned an empty page; no_items_found means the crawl read the start page but found no data it could use, so it had nothing to follow; start from a listing or product page. A failed crawl, and a stopped one with an error, answer ok: false: error.code is CRAWL_INSUFFICIENT_CREDITS or CRAWL_KEY_CAP_REACHED (the codes crawl_create gets on a 402) when credits ended it, failed or stopped, else CRAWL_FAILED; error.server_code is the crawl's error.code. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_get call, to continue from there"),
@@ -303,11 +331,12 @@ While the crawl runs the list is partial (partial=true): call again later with t
     "crawl_content",
     {
       annotations: { title: "Crawl Page Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Read the stored HTML of one URL a crawl kept. Works only for crawls created with output_format "html", and only for results whose content_status is fetched.
+      description: `Read the stored page of one URL a crawl kept, in the crawl's output_format. Works only for crawls created with an output_format, and only for results whose content_status is fetched.
 
-Pass crawl_id and content_id: a content id, or content_url from a crawl_results row. Returns raw HTML,
-cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. For a
-markdown version of a page, use scrape on its URL instead.`,
+Pass crawl_id and content_id: a content id, or content_url from a crawl_results row. Returns the page
+as stored — raw HTML for output_format "html", Markdown for "markdown" — cut to max_chars (default
+${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. To read a page the crawl did not
+store, use scrape on its URL instead.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         content_id: z
@@ -320,7 +349,7 @@ markdown version of a page, use scrape on its URL instead.`,
           .min(1000)
           .max(10_000_000)
           .nullish()
-          .describe(`Max characters of HTML to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
+          .describe(`Max characters of the page to return (default ${DEFAULT_CONTENT_MAX_CHARS})`),
       },
     },
     async ({ crawl_id, content_id, max_chars }) => {
@@ -395,7 +424,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
     "crawl_wait",
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
+      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). A crawl that ends completed with no results and no error finished; it is not a failure (see crawl_get). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z
@@ -446,7 +475,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
 
 The file goes to path when given (a relative path inside ~/.zenrows/crawls; an absolute path or one that leaves that folder fails with INVALID_PATH), else ~/.zenrows/crawls/<crawl_id>.jsonl. An existing file is kept and the call fails with FILE_EXISTS unless overwrite is true.
 
-On a running crawl the file holds only what was kept so far: download again once crawl_wait says it ended. On the hosted server no file is written: the reply gives the download URL and a command to run where your API key is set.`,
+On a running crawl the file holds only what was kept so far: download again once crawl_wait says it ended. After crawl_stop, pages in flight can still add lines for up to 10 minutes: the reply says so with partial: true. On the hosted server no file is written: the reply gives the download URL and a command to run where your API key is set.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         path: z
@@ -469,6 +498,17 @@ On a running crawl the file holds only what was kept so far: download again once
       }
     }
   );
+
+  /** Whether the API still reads pages for a stopped crawl: it keeps next_cursor set until it is done. */
+  async function stillReading(crawlId: string): Promise<boolean> {
+    let cursor: string | undefined;
+    for (;;) {
+      const read = await readResults(crawlId, { ...call, cursor, limit: 10_000 });
+      if (read.next_cursor === null) return false;
+      if (read.results.length === 0 || read.next_cursor === cursor) return true;
+      cursor = read.next_cursor;
+    }
+  }
 
   /** The hosted server has no disk the user can read: hand back where the file is and how to fetch it. */
   async function hostedDownload(crawlId: string) {
@@ -549,16 +589,22 @@ On a running crawl the file holds only what was kept so far: download again once
       throw e;
     }
     const pending = counts.pending ?? 0;
+    // A stop reads `stopped` at once, but the API still reads the pages in flight for up to 10 minutes
+    // and builds the file from what it kept until then. Its next_cursor says when it is done.
+    const reading = status === "stopped" && (await stillReading(crawlId));
     const note =
       status === "running"
         ? "The crawl is still running, so the file holds only what was kept so far. Download again once crawl_wait says it ended."
-        : pending > 0
-          ? `${pending} line(s) are pending, so they have no content yet. Pages in flight when a crawl stops can still finish for up to 10 minutes: download again with overwrite: true to pick them up.`
-          : undefined;
+        : reading
+          ? "The crawl was stopped, but pages fetched before the stop can still add lines for up to 10 minutes: download again later with overwrite: true."
+          : pending > 0
+            ? `${pending} line(s) are pending: the crawl ended before their page was fetched, so they stay without content.`
+            : undefined;
     return {
       ok: true,
       crawl_id: crawlId,
       status,
+      partial: status === "running" || reading,
       path: target,
       lines,
       bytes,

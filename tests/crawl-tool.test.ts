@@ -107,6 +107,34 @@ test("crawl_create's description says a crawl whose patterns match nothing still
   assert.match(c.description, /match\s+nothing still costs that one scrape/);
 });
 
+test("crawl's descriptions say 0 results with no error is a completed crawl, and to check the patterns", () => {
+  const { configs } = register();
+  const c = configs.crawl_create;
+  const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
+  assert.match(c.description, /ends completed with no results\s+and no error/);
+  assert.match(c.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_get.description, /completed with no results and no error/);
+  assert.match(configs.crawl_get.description, /check them against the URLs the start page links to/);
+  assert.match(configs.crawl_wait.description, /completed with no results and no error finished; it is not a failure/);
+  for (const text of [
+    c.description,
+    configs.crawl_get.description,
+    String(shape.max_pages.description),
+    String(shape.include_patterns.description),
+    String(shape.exclude_patterns.description),
+  ]) {
+    assert.doesNotMatch(text, /not the pages it opens|opened only to reach|still opens|may still open/);
+  }
+});
+
+test("crawl_get's description gives no_items_found and seed_unreachable their meanings", () => {
+  const d = register().configs.crawl_get.description;
+  assert.match(d, /seed_unreachable means the start URL could not be fetched or returned an empty page/);
+  assert.match(d, /no_items_found means the crawl read the start page but found no data it could use/);
+  assert.match(d, /start from a listing or product page/);
+  assert.doesNotMatch(d, /loosen them|Extract/);
+});
+
 test("crawl_create returns the API's 422 for depth 0 as CRAWL_INVALID_REQUEST", async () => {
   const { handlers } = register();
   const out = await withFetch(
@@ -210,9 +238,20 @@ test("crawl_results on an ended crawl still says partial when the call filled it
 
 test("crawl_create's schema takes only its own inputs and drops unknown ones", () => {
   const shape = register().configs.crawl_create.inputSchema;
-  assert.equal("discovery" in shape, false);
-  const parsed = z.object(shape).parse({ url: "https://example.com/", depth: 1, discovery: ["links"] });
-  assert.equal("discovery" in parsed, false);
+  const parsed = z.object(shape).parse({ url: "https://example.com/", depth: 1, extract_calls: 3 });
+  assert.equal("extract_calls" in parsed, false);
+});
+
+test("crawl_create takes discovery links and refuses any other strategy", () => {
+  const schema = z.object(register().configs.crawl_create.inputSchema);
+  assert.deepEqual(schema.parse({ url: "https://example.com/", discovery: ["links"] }).discovery, ["links"]);
+  for (const discovery of [["pagination"], ["links", "pagination"], []]) {
+    assert.equal(
+      schema.safeParse({ url: "https://example.com/", discovery }).success,
+      false,
+      JSON.stringify(discovery)
+    );
+  }
 });
 
 test("crawl_create sends only the fields the caller set", async () => {
@@ -236,6 +275,7 @@ test("crawl_create sends only the fields the caller set", async () => {
         exclude_patterns: null,
         output_format: "html",
       });
+      await handlers.crawl_create({ url: "https://example.com/", discovery: ["links"] });
     }
   );
   assert.deepEqual(bodies[0], { url: "https://example.com/", depth: 2 });
@@ -249,6 +289,7 @@ test("crawl_create sends only the fields the caller set", async () => {
     include_patterns: ["/product/"],
     output_format: "html",
   });
+  assert.deepEqual(bodies[4], { url: "https://example.com/", discovery: ["links"] }, "discovery sent as given");
 });
 
 test("crawl_create takes idempotency_key and has no follow or timeout", () => {
@@ -366,7 +407,14 @@ test("crawl_get carries crawl_id on an error", async () => {
 
 test("a crawl that ended failed comes back ok: false with its error, from crawl_wait and crawl_get", async () => {
   const { handlers } = register();
-  const failed = { ...crawl("failed"), error: { code: "no_items_found", detail: "No link matched the URL patterns." } };
+  const failed = {
+    ...crawl("failed"),
+    error: {
+      code: "no_items_found",
+      detail:
+        "The crawl read the start page but found no data it could use, so it had nothing to follow. Start from a listing or product page.",
+    },
+  };
   for (const call of [
     () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
     () => handlers.crawl_get({ crawl_id: "c_1" }),
@@ -378,8 +426,86 @@ test("a crawl that ended failed comes back ok: false with its error, from crawl_
     assert.equal(body.crawl_id, "c_1");
     assert.equal(body.error.code, "CRAWL_FAILED");
     assert.equal(body.error.server_code, "no_items_found");
-    assert.match(body.error.message, /No link matched/);
+    assert.match(body.error.message, /found no data it could use/);
   }
+});
+
+test("a completed crawl with patterns and 0 results comes back ok: true with no error", async () => {
+  const { handlers } = register();
+  const empty = {
+    ...crawl("completed"),
+    include_patterns: ["/product/"],
+    coverage: { pages_fetched: 1, pages_failed: 0, items_found: 0 },
+  };
+  for (const call of [
+    () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 }),
+    () => handlers.crawl_get({ crawl_id: "c_1" }),
+  ]) {
+    const out = await withFetch(() => jsonResponse({ ...empty, results: [], next_cursor: null }), call);
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, true);
+    assert.equal(body.status, "completed");
+    assert.equal(body.crawl.coverage.items_found, 0);
+    assert.equal(body.error, undefined);
+  }
+});
+
+// What the server says when credits end a crawl, as error.detail.
+const creditStopDetail: Record<string, string> = {
+  insufficient_credits: "The crawl stopped because your account has no credits left.",
+  api_key_cap_reached: "The crawl stopped because your API key reached one of its credit caps.",
+};
+
+test("a crawl the credits ended comes back ok: false with the code a 402 create gets, stopped or failed", async () => {
+  const { handlers } = register();
+  const cases = [
+    { status: "stopped", server: "insufficient_credits", code: "CRAWL_INSUFFICIENT_CREDITS", advice: /Add credits/ },
+    {
+      status: "stopped",
+      server: "api_key_cap_reached",
+      code: "CRAWL_KEY_CAP_REACHED",
+      advice: /Raise or remove the cap/,
+    },
+    // Older deployments end such a crawl failed: agents see the same code.
+    { status: "failed", server: "insufficient_credits", code: "CRAWL_INSUFFICIENT_CREDITS", advice: /Add credits/ },
+    {
+      status: "failed",
+      server: "api_key_cap_reached",
+      code: "CRAWL_KEY_CAP_REACHED",
+      advice: /Raise or remove the cap/,
+    },
+  ];
+  for (const k of cases) {
+    const label = `${k.status} ${k.server}`;
+    const ended = { ...crawl(k.status), error: { code: k.server, detail: creditStopDetail[k.server] } };
+    const out = await withFetch(
+      () => jsonResponse({ ...ended, results: [], next_cursor: null }),
+      () => handlers.crawl_wait({ crawl_id: "c_1", timeout: 1 })
+    );
+    const body = JSON.parse(out.content[0].text);
+    assert.equal(body.ok, false, label);
+    assert.equal(body.status, k.status, label);
+    assert.equal(body.crawl_id, "c_1", label);
+    assert.equal(body.error.code, k.code, label);
+    assert.equal(body.error.server_code, k.server, label);
+    assert.equal(body.error.detail, creditStopDetail[k.server], label);
+    assert.ok(body.error.message.includes(`Crawl c_1 ${k.status} (${k.server}): ${creditStopDetail[k.server]}`), label);
+    assert.match(body.error.message, k.advice, label);
+  }
+});
+
+test("a crawl stopped with any other error code comes back ok: false with CRAWL_FAILED", async () => {
+  const { handlers } = register();
+  const stopped = { ...crawl("stopped"), error: { code: "internal", detail: "Something broke." } };
+  const out = await withFetch(
+    () => jsonResponse({ ...stopped, results: [], next_cursor: null }),
+    () => handlers.crawl_get({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.ok, false);
+  assert.equal(body.error.code, "CRAWL_FAILED");
+  assert.equal(body.error.server_code, "internal");
+  assert.match(body.error.message, /stopped \(internal\): Something broke/);
 });
 
 test("a crawl that did not fail stays ok: true with no error", async () => {
@@ -730,25 +856,44 @@ test("crawl_download saves every line to <dir>/<crawl_id>.jsonl and counts them"
   const out = await withFetch(
     (u, init) => {
       seen.push(`${init?.method} ${new URL(u).pathname} ${(init?.headers as Record<string, string>)["X-API-Key"]}`);
-      return ndjson(lines, "stopped", true);
+      return new URL(u).pathname.endsWith("/download")
+        ? ndjson(lines, "stopped", true)
+        : jsonResponse({ ...crawl("stopped"), results: lines.map(({ url }) => ({ url })), next_cursor: null });
     },
     () => handlers.crawl_download({ crawl_id: "c_1" })
   );
   assert.equal(out.isError, undefined, out.content[0].text);
   const body = JSON.parse(out.content[0].text);
-  assert.deepEqual(seen, ["GET /v1/crawls/c_1/download k"]);
+  assert.deepEqual(seen, ["GET /v1/crawls/c_1/download k", "GET /v1/crawls/c_1 k"]);
   assert.equal(body.ok, true);
   assert.equal(body.path, join(dir, "c_1.jsonl"));
   assert.equal(body.status, "stopped");
   assert.equal(body.lines, 3);
   assert.deepEqual(body.content_status, { fetched: 2, pending: 1 });
-  assert.match(body.note, /1 line\(s\) are pending.*overwrite: true/);
+  assert.equal(body.partial, false);
+  assert.match(body.note, /1 line\(s\) are pending.*stay without content/);
   const saved = (await readFile(body.path, "utf8"))
     .trim()
     .split("\n")
     .map((l) => JSON.parse(l));
   assert.deepEqual(saved, lines);
   assert.deepEqual(await readdir(dir), ["c_1.jsonl"]);
+});
+
+test("crawl_download on a stopped crawl is partial while the API keeps next_cursor set", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "crawl-dl-"));
+  const { handlers } = register({ downloadDir: dir });
+  const out = await withFetch(
+    (u) =>
+      new URL(u).pathname.endsWith("/download")
+        ? ndjson(lines, "stopped")
+        : jsonResponse({ ...crawl("stopped"), results: [], next_cursor: "p2" }),
+    () => handlers.crawl_download({ crawl_id: "c_1" })
+  );
+  const body = JSON.parse(out.content[0].text);
+  assert.equal(body.status, "stopped");
+  assert.equal(body.partial, true);
+  assert.match(body.note, /stopped.*download again later/);
 });
 
 test("crawl_download keeps an existing file unless overwrite is true", async () => {
@@ -819,6 +964,7 @@ test("crawl_download on a running crawl says the file is partial", async () => {
   );
   const body = JSON.parse(out.content[0].text);
   assert.equal(body.status, "running");
+  assert.equal(body.partial, true);
   assert.equal("content_status" in body, false, "a URLs-only crawl has no content_status to count");
   assert.match(body.note, /still running.*Download again/);
 });

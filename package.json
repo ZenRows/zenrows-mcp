@@ -1,7 +1,7 @@
 {
   "name": "@zenrows/mcp",
-  "version": "2.7.0",
-  "description": "Zenrows MCP server — Fetch, Extract, Batch, and Browser Sessions for AI coding assistants",
+  "version": "2.13.0",
+  "description": "Zenrows MCP server: Fetch, Extract, Batch, and Browser Sessions for AI agents",
   "type": "module",
   "bin": {
     "zenrows-mcp": "dist/index.js"

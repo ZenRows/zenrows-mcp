@@ -108,7 +108,9 @@ await check(
   "Start the server from the README's stdio config",
   "the server starts and answers tools/list",
   async () => {
-    srv = await startServer(HAS_KEY ? KEY : "invalid");
+    // The server reads its own variable, not CRAWL_API_BASE: without this it would
+    // reach production whatever the run targets.
+    srv = await startServer(HAS_KEY ? KEY : "invalid", { ZENROWS_CRAWL_API_BASE: H.API_BASE });
     const t = await srv.client.listTools();
     return {
       status: passIf(t.tools.length > 0),
@@ -495,7 +497,7 @@ if (HAS_KEY) {
 await liveCheck(
   "20",
   "Results after stop",
-  "crawl_results on a crawl stopped with pages in flight: partial false, no note to call again, and no URL lost",
+  "crawl_results on a crawl stopped with pages in flight: no URL lost; partial follows next_cursor, and while it is set a note says to call again",
   async () => {
     if (!B || stopInfo?.error) return { status: FAIL, actual: `setup failed: ${stopInfo?.error}` };
     if (stopInfo.status !== "stopped") {
@@ -515,7 +517,7 @@ await liveCheck(
     const urls = (rows) => JSON.stringify((rows ?? []).map((x) => x.url).sort());
     const same = urls(d.results) === urls(later);
     const pending = (d.results ?? []).filter((x) => x.content_status === "pending").length;
-    const ok = !now.isError && d.partial === false && !d.note && same;
+    const ok = !now.isError && same && d.partial === (d.next_cursor != null) && (!d.partial || Boolean(d.note));
     return {
       status: passIf(ok),
       actual: `stopped with ${stopInfo.items} kept; first read: ${d.count} URLs (${pending} pending), partial ${d.partial}, next_cursor ${d.next_cursor === null ? "null" : "set"}, note: ${d.note ?? "none"}; then ${settledNote}: ${later.length} URLs, same set ${same}`,
@@ -667,10 +669,52 @@ await liveCheck("14", "Gated option", "output_format json is refused: by the inp
   return {
     status: passIf(bySchema || byApi),
     actual: bySchema
-      ? `refused before the API: the input schema takes "html" only (${H.trim(text, 200)})`
+      ? `refused before the API: the input schema takes "html" or "markdown" (${H.trim(text, 200)})`
       : H.trim(show(r), 300),
   };
 });
+await liveCheck(
+  "22",
+  "Markdown output",
+  'crawl_create with output_format "markdown" is accepted and echoed back',
+  async () => {
+    const r = await call(S, "crawl_create", { ...base, max_items: 1, max_pages: 1, output_format: "markdown" });
+    if (r.isError || !r.data?.crawl_id) {
+      return { status: FAIL, actual: H.trim(show(r), 400) };
+    }
+    ledger(r.data.crawl_id, "output_format markdown");
+    await call(S, "crawl_stop", { crawl_id: r.data.crawl_id });
+    return {
+      status: passIf(r.data.crawl?.output_format === "markdown"),
+      actual: `${r.data.crawl_id}: output_format ${r.data.crawl?.output_format}`,
+    };
+  },
+);
+await liveCheck(
+  "23",
+  "Discovery",
+  'crawl_create with discovery ["links"] is echoed back; a create without it reads ["links"]; pagination is refused before the API',
+  async () => {
+    const given = await create({ ...base, max_items: 1, max_pages: 1, discovery: ["links"] });
+    const leftOut = await create({ ...base, max_items: 1, max_pages: 1 });
+    for (const c of [given, leftOut]) {
+      if (c?.data?.crawl_id) await call(S, "crawl_stop", { crawl_id: c.data.crawl_id });
+    }
+    const refused = await call(S, "crawl_create", { ...base, discovery: ["pagination"] });
+    if (!refused.isError && refused.data?.crawl_id) {
+      ledger(refused.data.crawl_id, "discovery pagination (accepted)");
+      await call(S, "crawl_stop", { crawl_id: refused.data.crawl_id });
+    }
+    const one = JSON.stringify(["links"]);
+    const asked = given?.data?.crawl?.discovery;
+    const omitted = leftOut?.data?.crawl?.discovery;
+    const ok = JSON.stringify(asked) === one && JSON.stringify(omitted) === one && refused.isError;
+    return {
+      status: passIf(ok),
+      actual: JSON.stringify({ given: asked, leftOut: omitted, paginationRefused: refused.isError }),
+    };
+  },
+);
 await check("15", "Bad key", "AUTH_INVALID", async () => {
   const bad = await startServer("invalid");
   const r = await call(bad.client, "crawl_get", { crawl_id: "c_does_not_exist" });
@@ -700,22 +744,26 @@ await check(
   },
 );
 
-// ---------- 19-21: a failed crawl, results after a stop, the documented defaults ----------
+// ---------- 19-21: a crawl that matches nothing, results after a stop, the documented defaults ----------
 await liveCheck(
   "19",
-  "Failed crawl",
-  "a crawl that keeps nothing ends failed (no_items_found); crawl_wait says ok: false with the crawl's error",
+  "No match",
+  "a crawl whose pattern matches nothing ends completed with 0 results and no error; crawl_wait says ok: true",
   async () => {
     const r = await create({ url: CRAWL_URL, depth: 1, include_patterns: [H.NO_MATCH] });
     F = r.data;
     if (r.isError) return { status: FAIL, actual: show(r) };
     const w = await waitEnd(F.crawl_id);
     const d = w.data ?? {};
-    const failed = d.status === "failed" && d.crawl?.error?.code === "no_items_found";
-    const ok = failed && d.ok === false && d.crawl_id === F.crawl_id;
+    const empty =
+      d.status === "completed" &&
+      d.crawl?.coverage?.items_found === 0 &&
+      d.crawl?.error === undefined &&
+      d.error === undefined;
+    const ok = empty && d.ok === true && d.crawl_id === F.crawl_id;
     return {
       status: passIf(ok),
-      actual: `${F.crawl_id}: status ${d.status}, ok ${d.ok}, error ${JSON.stringify(d.crawl?.error ?? d.error)}`,
+      actual: `${F.crawl_id}: status ${d.status}, ok ${d.ok}, items ${d.crawl?.coverage?.items_found}, error ${JSON.stringify(d.crawl?.error ?? d.error ?? null)}`,
       evidence: show(w),
     };
   },
@@ -758,6 +806,7 @@ H.naming({
       "include_patterns",
       "exclude_patterns",
       "output_format",
+      "discovery",
       "idempotency_key",
       "cursor",
       "limit",

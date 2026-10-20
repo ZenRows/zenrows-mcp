@@ -9,11 +9,7 @@ import { test } from "node:test";
  * resource has no scopes" rather than "nobody wrote them down", and the
  * authorization-server document omitted the field entirely. Both now name the one
  * scope the token really carries.
- *
- * Setting AWS_LAMBDA_FUNCTION_NAME before the import keeps src/http.ts from opening
- * a listener: the module starts a dev server when it thinks it is not on Lambda.
  */
-process.env.AWS_LAMBDA_FUNCTION_NAME = "test";
 
 const { handler } = await import("../src/http.ts");
 
@@ -60,11 +56,12 @@ test("each protected resource document names the resource its URL was built from
 });
 
 test("the key is read from a Bearer header and ?apikey=, never ?access_token=", async () => {
-  const initialize = JSON.stringify({
+  // tools/call, because discovery methods such as initialize are answered without a key.
+  const toolCall = JSON.stringify({
     jsonrpc: "2.0",
     id: 1,
-    method: "initialize",
-    params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } },
+    method: "tools/call",
+    params: { name: "no_such_tool", arguments: {} },
   });
   const call = (headers: Record<string, string>, rawQueryString?: string) =>
     handler({
@@ -72,7 +69,7 @@ test("the key is read from a Bearer header and ?apikey=, never ?access_token=", 
       rawPath: "/mcp",
       rawQueryString,
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
-      body: initialize,
+      body: toolCall,
     });
 
   assert.equal((await call({ authorization: "Bearer test-key" })).statusCode, 200);
@@ -103,7 +100,7 @@ test("the challenge on an unauthenticated call names the scope", async () => {
     requestContext: { http: { method: "POST" } },
     rawPath: "/mcp",
     headers: {},
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "scrape", arguments: {} } }),
   });
 
   assert.equal(response.statusCode, 401);
@@ -117,4 +114,36 @@ test("the challenge on an unauthenticated call names the scope", async () => {
   const { json } = await get(metadataUrl.pathname);
   assert.equal(json.resource, "https://mcp.zenrows.com/mcp");
   assert.equal(response.headers.link, `<${metadataUrl.href}>; rel="oauth-protected-resource"`);
+});
+
+test("the authorization server advertises anonymous agent signup", async () => {
+  const { json } = await get("/.well-known/oauth-authorization-server");
+  const base = "https://app.zenrows.com";
+  assert.deepEqual(json.agent_auth, {
+    signup_endpoint: `${base}/api/agent/signup`,
+    signup_method: "POST",
+    requires_human: false,
+    register_uri: `${base}/api/agent/signup`,
+    claim_uri: `${base}/api/agent/claim`,
+    identity_types_supported: ["anonymous"],
+    anonymous: { credential_types_supported: ["api_key"] },
+    claim_hint: "The created account is unclaimed; a human can claim it via the returned claimUrl.",
+    skill: `${base}/agent-onboarding/auth.md`,
+    playbook: `${base}/agent-onboarding/SKILL.md`,
+    docs: `${base}/agent-onboarding/auth.md`,
+  });
+});
+
+test("the server card describes the server the way npm and the MCP Registry do", async () => {
+  const { description } = (await import("../package.json", { with: { type: "json" } })).default as {
+    description: string;
+  };
+
+  for (const path of ["/.well-known/mcp/server-card.json", "/.well-known/mcp.json"]) {
+    const { statusCode, json } = await get(path);
+    assert.equal(statusCode, 200, path);
+    assert.equal(json.description, description, path);
+    // Plugin directories read this card; the tool descriptions already avoid these words.
+    assert.doesNotMatch(String(json.description), /stealth|anti-?bot|bypass|protected/i, path);
+  }
 });
