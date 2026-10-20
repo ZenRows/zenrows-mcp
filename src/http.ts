@@ -282,6 +282,10 @@ function mcpServerCard() {
   };
 }
 
+// Domain-ownership proof for the OpenAI apps directory submission.
+const OPENAI_APPS_CHALLENGE = "YzMDllJ36qCX2SecyZoIX9OVVlQTCimoiSvrR3b7CP0";
+app.get("/.well-known/openai-apps-challenge", (c) => c.text(OPENAI_APPS_CHALLENGE));
+
 app.get("/.well-known/mcp.json", (c) =>
   c.json(mcpServerCard(), 200, {
     "Cache-Control": "public, max-age=300",
