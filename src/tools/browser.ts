@@ -878,7 +878,7 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_clear_cookies",
     {
-      annotations: { title: "Clear Cookies", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+      annotations: { title: "Clear Cookies", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
       description: "Clear all cookies for the current browser session.",
       inputSchema: { session_id: sessionId },
     },
@@ -896,32 +896,57 @@ labels, and states — everything needed to drive browser interactions.`,
 
   // ─── Local Storage ────────────────────────────────────────────────────────
 
+  // One tool per operation, so each carries its own annotations: reading is
+  // read-only, clearing is destructive.
+  const localStorage = async (tool: string, body: Record<string, unknown>, sessionId: string) => {
+    const fetch = tfetch(tool);
+    try {
+      const result = await fetch("POST", `/browser/sessions/${sessionId}/local_storage`, body);
+      if (!result.ok) return err(`Local storage operation failed: ${browserError(result)}`);
+      return json(result.data);
+    } catch (e) {
+      return err(`Network error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
   server.registerTool(
-    "browser_local_storage",
+    "browser_get_local_storage",
     {
-      annotations: { title: "Local Storage", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: "Read, write, or clear localStorage in the current page context.",
+      annotations: { title: "Get Local Storage Item", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+      description: "Read one localStorage value in the current page context.",
+      inputSchema: { session_id: sessionId, key: z.string().describe("Storage key to read") },
+    },
+    async ({ session_id, key }) => localStorage("browser_get_local_storage", { action: "get", key }, session_id)
+  );
+
+  server.registerTool(
+    "browser_set_local_storage",
+    {
+      annotations: {
+        title: "Set Local Storage Item",
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: true,
+      },
+      description: "Write one localStorage value in the current page context.",
       inputSchema: {
         session_id: sessionId,
-        action: z.enum(["get", "set", "clear"]).describe("Operation: get a value, set a value, or clear all"),
-        key: z.string().nullish().describe("Storage key (required for get and set)"),
-        value: z.string().nullish().describe("Value to store (required for set)"),
+        key: z.string().describe("Storage key to write"),
+        value: z.string().describe("Value to store"),
       },
     },
-    async ({ session_id, action, key, value }) => {
-      const fetch = tfetch("browser_local_storage");
-      try {
-        const result = await fetch("POST", `/browser/sessions/${session_id}/local_storage`, {
-          action,
-          key,
-          value,
-        });
-        if (!result.ok) return err(`Local storage operation failed: ${browserError(result)}`);
-        return json(result.data);
-      } catch (e) {
-        return err(`Network error: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
+    async ({ session_id, key, value }) =>
+      localStorage("browser_set_local_storage", { action: "set", key, value }, session_id)
+  );
+
+  server.registerTool(
+    "browser_clear_local_storage",
+    {
+      annotations: { title: "Clear Local Storage", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      description: "Delete every localStorage entry in the current page context.",
+      inputSchema: { session_id: sessionId },
+    },
+    async ({ session_id }) => localStorage("browser_clear_local_storage", { action: "clear" }, session_id)
   );
 
   // ─── Tabs ─────────────────────────────────────────────────────────────────
