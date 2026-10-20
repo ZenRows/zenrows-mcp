@@ -10,6 +10,7 @@ import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
 import { registerCrawlTools } from "./tools/crawl.js";
 import { registerExtractTool } from "./tools/extract.js";
+import { registerPrepareTools } from "./tools/prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
@@ -185,8 +186,8 @@ Examples:
           .boolean()
           .nullish()
           .describe(
-            "Automatically extract structured data from the page into JSON. " +
-              "Best for product pages, articles, and listings."
+            "Deprecated: general-purpose structured JSON from the page. " +
+              "Prefer the extract tool (extract=auto on a prepared domain, or css_extractor)."
           ),
 
         css_extractor: z
@@ -391,6 +392,7 @@ Examples:
   );
 
   registerExtractTool(server, apiKey, getClientName);
+  registerPrepareTools(server, apiKey);
   registerBatchTools(server, apiKey, getClientName);
   registerCrawlTools(server, apiKey, { hosted: options.hosted });
   registerAccountTools(server, apiKey);
