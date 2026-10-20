@@ -43,10 +43,15 @@ for (const hosted of [false, true]) {
   });
 }
 
-test("tools that delete browser state are marked destructive", async () => {
+test("tools that delete or overwrite browser state are marked destructive", async () => {
   const tools = await listTools(true);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  for (const name of ["browser_clear_cookies", "browser_clear_local_storage"]) {
+  for (const name of [
+    "browser_clear_cookies",
+    "browser_clear_local_storage",
+    "browser_set_cookies",
+    "browser_set_local_storage",
+  ]) {
     assert.equal(byName.get(name)?.annotations?.destructiveHint, true, name);
   }
   assert.equal(byName.get("browser_get_local_storage")?.annotations?.readOnlyHint, true);

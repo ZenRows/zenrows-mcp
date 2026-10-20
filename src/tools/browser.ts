@@ -840,8 +840,9 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_set_cookies",
     {
-      annotations: { title: "Set Cookies", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: "Set one or more cookies in the browser session.",
+      annotations: { title: "Set Cookies", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      description:
+        "Set one or more cookies in the browser session. A cookie with the same name, domain and path replaces the existing one.",
       inputSchema: {
         session_id: sessionId,
         cookies: z
@@ -925,10 +926,11 @@ labels, and states — everything needed to drive browser interactions.`,
       annotations: {
         title: "Set Local Storage Item",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         openWorldHint: true,
       },
-      description: "Write one localStorage value in the current page context.",
+      description:
+        "Write one localStorage value in the current page context. An existing value under the same key is replaced.",
       inputSchema: {
         session_id: sessionId,
         key: z.string().describe("Storage key to write"),
