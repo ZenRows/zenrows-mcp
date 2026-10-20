@@ -130,6 +130,8 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 
 **Optional:** `ZENROWS_CRAWL_API_BASE` sets the Crawl API base URL for the `crawl_*` tools (default `https://api.zenrows.com/v1`). Set it only to point those tools at another deployment.
 
+**Optional:** `ZENROWS_BATCH_API_BASE` sets the Batch API base URL for the `batch_*` tools (default `https://async.api.zenrows.com/v1`). Set it only to point those tools at another deployment.
+
 The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
 
 ---
@@ -142,9 +144,48 @@ The Zenrows MCP exposes these tool families:
 |------|---------|
 | **`scrape`** | Full-page content → Markdown, plain text, HTML, PDF, or screenshot (plus helper outputs). |
 | **`extract`** | Structured JSON (`extract=auto`, autoparse, or `css_extractor`) + optional stealth flags. `extract=auto` is currently free (billing may apply later) and works on any domain Zenrows has prepared, with any API key; on a domain not prepared yet (`REQS007`) it falls back to autoparse. |
-| **`batch_create` / `batch_status` / `batch_results` / `batch_cancel` / `batch_wait`** | Cloud Batch API fan-out (`async.api.zenrows.com`). Same credits as Fetch; a 403 maps to `BATCH_ACCESS_DENIED`. Not `browser_batch`. |
+| **`batch_create` / `batch_status` / `batch_wait` / `batch_results` / `batch_content` / `batch_list` / `batch_cancel` / `batch_pause` / `batch_resume` / `batch_rerun` / `batch_delete`** | Cloud Batch API fan-out (`async.api.zenrows.com`). Same credits as Fetch. Not `browser_batch`. See [Batch tools](#batch-tools) below. |
 | **`crawl_create` / `crawl_get` / `crawl_results` / `crawl_content` / `crawl_download` / `crawl_list` / `crawl_stop` / `crawl_wait`** | Crawl API (`api.zenrows.com/v1/crawls`). New. Crawl is still evolving: new features are coming, limits may be tuned, and the changelog announces each change. Give one start URL, get back the URLs behind it on the same registrable domain (subdomains count), optionally with each page's HTML (`output_format: "html"`). `crawl_create` returns at once; call `crawl_wait` (counts and the first 20 URLs), then `crawl_download` to save every result to a local JSON-lines file (default `~/.zenrows/crawls/<crawl_id>.jsonl`; a `path` must stay inside `~/.zenrows/crawls`; an existing file is kept unless `overwrite: true`; the hosted server writes no file and returns the download URL and a `curl` command instead), or `crawl_results` to page through them. Leave `depth` out of `crawl_create` for no depth limit: the crawl follows links until `max_pages` or `max_items` (default 100 each) stops it, and each page fetched is billed as one scrape. Set `idempotency_key` on `crawl_create` to make a retry safe. `crawl_content` takes `crawl_id` and `content_id` (a content id or a result's `content_url`). Reads retry on 429, 502, 503, 504 and network errors (up to 3 times, honoring `Retry-After` up to 30 seconds); `crawl_create` retries only with an `idempotency_key`, and never on 429; `crawl_stop` retries on 429, 502, 503 and 504 (repeating a stop is safe; a 503 `crawl_busy` means the stop was not saved yet), up to 3 times and 50 seconds at most in all, and returns `CRAWL_BUSY` if a `crawl_busy` persists. May return `CRAWL_NOT_ENABLED` (Crawl is not enabled for this account). |
 | **`browser_*`** | 30+ tools for full browser automation (navigation, clicks, forms, JS, cookies, tabs, sessions). |
+
+### Batch tools
+
+A Batch job scrapes many URLs asynchronously. The usual flow: `batch_create`, then `batch_wait` until the run ends, `batch_results` to page through the rows, and `batch_content` to read one task's page.
+
+- **`batch_create`** submits one closed job with all its tasks, up to 100,000 per call. Each task takes a `url` (http or https, up to 2,048 characters), plus optional `external_id` (up to 128 characters of letters, digits, `.`, `_` and `-`; need not be unique), `metadata` (up to 20 string-to-string entries, 4 KiB in all), `method` and `body` for POST tasks (body up to 16 KiB; POST is for read-only queries, since the target can receive a POST more than once), and scrape params, in `zenrows_params` or flat on the task. An unknown task field fails the call by name, before anything is sent. `response_type` takes `markdown`, `plaintext` or `pdf`; leave it out for HTML. Tasks use `mode=auto` unless you force `js_render` or `premium_proxy`. Every call sends an `Idempotency-Key`, generated unless you set `idempotency_key`: a repeat with the same key and body within 24 hours returns the original job instead of a second one, and a different body is `BATCH_IDEMPOTENCY_CONFLICT`. An error reply carries the key to retry with. Set `wait: true` to return when the run ends or pauses, or when `wait_timeout` (seconds, default 50) passes.
+- **`batch_status`** and **`batch_wait`** report the latest run's `status` (`pending`, `running`, `completed`, `stopped`, `failed`) and `stats`. `batch_wait` polls until the run ends, returns at once with `paused: true` on a paused run, and tolerates transient errors. Its `timeout` is in seconds (default 50, under the 60 seconds after which many clients cancel a call); when it runs out, the reply is the current state with `ok: true`, `timed_out: true` and a note, not an error. A call with a `progressToken` gets a progress notification after each poll. A run still writing its tasks (submits of 10,000 or more, and every rerun) has `ingesting: true`.
+- **`batch_results`** returns up to `limit` rows (default 100, max 1,000) and a `next_cursor`; pass it back as `cursor` until it is `null`. Filter with `status`: `all`, `successful`, `failed` or `processing`. Pass `run_id` for an earlier run. A row's `result_url` is presigned for 2 hours: list again, or use `batch_content`, for a fresh one. Results are kept 14 days by default; after that a successful row reads as `expired`, with no `result_url`.
+- **`batch_content`** returns one task's result. Text (HTML, Markdown, plain text, JSON) comes back inline, cut to `max_chars` (default 20,000); a PDF comes back as its presigned `result_url`; on a large run, finding it can take more than one call, and the reply then carries `lookup_cursor` to pass back. A task not finished yet is `BATCH_TASK_NOT_READY`, a failed one `BATCH_TASK_FAILED` (with `task_error`), an expired one `BATCH_RESULT_EXPIRED`.
+- **`batch_list`** lists the account's jobs, newest first (default 20 per page, max 100).
+- **`batch_cancel`** stops the current run for good: no waiting task starts, in-flight tasks finish and bill, results stay. **`batch_pause`** halts it until **`batch_resume`**; a paused run still counts as an active job. All three are idempotent, and on a run that already ended they answer with its final state and `already_ended: true`.
+- **`batch_rerun`** starts a new run once the latest one ended. By default it reruns the `failed` and `pending` tasks and carries the others over: the recovery after a run that ran out of credits or was cancelled. Pass `status` for other task statuses, or `full: true` to scrape every task again. A partial rerun works up to 10 days after the run started. It sends an `Idempotency-Key`.
+- **`batch_delete`** deletes a job with its runs and results, and frees its active-job slot.
+
+Costs: the same credits as the regular API, per successful task: 1 basic, 5 with `js_render`, 10 with `premium_proxy`, 25 with both; `mode=auto` bills each task at the configuration that worked. Failed tasks are not billed, except target 404 and 410 answers. An account runs 3 active jobs at once by default, shared with Crawl.
+
+A run that ends `failed` answers `ok: false`, with `error.code` the same as the matching HTTP error (`BATCH_INSUFFICIENT_CREDITS`, `BATCH_KEY_CAP_REACHED`, or `AUTH_INVALID` for an inactive subscription; `BATCH_RUN_FAILED` otherwise), `error.server_code` (the `failure_reason`), `error.job_id` and advice. Fix the cause, then `batch_rerun`.
+
+Errors carry `code`, `message`, `detail`, `server_code` (the Batch API's own code) and, for a call about one job, `job_id`:
+
+| Code | When |
+|------|------|
+| `BATCH_INVALID_REQUEST` | 400: the request was rejected; `invalid_tasks` lists the first bad tasks. Nothing was created. |
+| `AUTH_INVALID` | 401: the API key was rejected, or, with `server_code` `subscription_inactive`, the key is valid but the subscription needs fixing in Billing. |
+| `BATCH_INSUFFICIENT_CREDITS` | 402: the account has no credits left. |
+| `BATCH_KEY_CAP_REACHED` | 402: this API key reached one of its credit caps; the account's other keys still work. |
+| `BATCH_ACCESS_DENIED` | 403: Batch is not enabled for this account or key. Do not retry. |
+| `BATCH_NOT_FOUND` | 404: no such job, run or task for this account (a deleted job included). |
+| `BATCH_RUN_ENDED`, `BATCH_RUN_NOT_FINISHED`, `BATCH_NO_MATCHING_TASKS`, `BATCH_RERUN_WINDOW_EXPIRED`, `BATCH_NO_PRIOR_RUN`, `BATCH_IDEMPOTENCY_CONFLICT`, `BATCH_TASK_NOT_READY`, `BATCH_CONFLICT` | 409, by `server_code`. |
+| `BATCH_RESULT_EXPIRED` | 410: past the job's retention. |
+| `BATCH_TASK_FAILED` | 422: the task failed; `task_error` holds its error. |
+| `BATCH_QUOTA_EXCEEDED` | 429: a job limit more credits do not raise (3 active jobs, shared with Crawl; 5 scheduled jobs). |
+| `BATCH_RATE_LIMITED` | Any other 429. |
+| `BATCH_FAILED` | Any other HTTP error. |
+| `BACKEND_UNAVAILABLE` | No response: a network error or timeout, after retries. |
+
+Reads retry on 429, 500, 502, 503, 504 and network errors, up to 3 times, honoring `Retry-After` up to 30 seconds. `batch_create` and `batch_rerun` retry on 500, 502, 503, 504, network errors and a 429 with `Retry-After`, always with the same `Idempotency-Key`; never on the job-limit 429. On `BATCH_IDEMPOTENCY_CONFLICT` for the same request, keep the key, check `batch_list` and retry later: a new key can create a second, billed job.
+
+Schedules, webhooks, results exports, CSV inputs, open jobs (adding tasks over time), runs and task history are available through the [Batch API](https://docs.zenrows.com/batch/introduction) and the Zenrows SDKs only.
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
 

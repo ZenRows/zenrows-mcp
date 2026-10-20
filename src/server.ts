@@ -26,7 +26,7 @@ const DEFAULT_RESPONSE_TYPE =
 export const INSTRUCTIONS = [
   "Zenrows returns the content of public web pages.",
   "Start with scrape for one page's content, or extract for structured JSON fields.",
-  "For many URLs use batch_create; to discover the URLs behind a listing or section page, use crawl_create.",
+  "For many URLs use batch_create, then batch_wait until it ends, batch_results to page through its rows and batch_content to read one page; to discover the URLs behind a listing or section page, use crawl_create.",
   "Use the browser_* tools only when a page needs clicks, typing or several steps: browser_navigate opens a session, and browser_close frees it when done.",
   "Call account_usage (free) before a large job or after a 402.",
 ].join(" ");
@@ -391,7 +391,7 @@ Examples:
   );
 
   registerExtractTool(server, apiKey, getClientName);
-  registerBatchTools(server, apiKey);
+  registerBatchTools(server, apiKey, getClientName);
   registerCrawlTools(server, apiKey, { hosted: options.hosted });
   registerAccountTools(server, apiKey);
 

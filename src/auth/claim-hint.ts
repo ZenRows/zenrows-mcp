@@ -59,7 +59,7 @@ function extractCode(body?: string, code?: string): string | undefined {
     const m = typeof j.error === "string" ? j.error.match(/\((AUTH\d+)\)/) : null;
     return m?.[1];
   } catch {
-    const m = body.match(/\b(AUTH\d+|BATCH_QUOTA_EXCEEDED)\b/);
+    const m = body.match(/\b(AUTH\d+|BATCH_[A-Z_]+)\b/);
     return m?.[1];
   }
 }
@@ -88,8 +88,10 @@ export function isQuotaOrPlanError(
   const code = extractCode(opts.body, opts.code);
   if (code && SKIP_CODES.has(code)) return false;
 
-  if (opts.status === 402) return true;
-  if (code === "BATCH_QUOTA_EXCEEDED") return true;
+  // Batch's BATCH_QUOTA_EXCEEDED (429) is a job-count limit that credits do not raise, so it
+  // gets no claim nudge; Batch's out-of-credits answer is a 402 (BATCH_INSUFFICIENT_CREDITS).
+  if (code === "BATCH_QUOTA_EXCEEDED" || code === "BATCH_RATE_LIMITED") return false;
+  if (opts.status === 402 || code === "BATCH_INSUFFICIENT_CREDITS") return true;
 
   const hay = `${opts.message ?? ""} ${opts.body ?? ""} ${code ?? ""}`;
   if (/\bHTTP\s*402\b/i.test(hay) || /\berror\s+402\b/i.test(hay)) return true;
