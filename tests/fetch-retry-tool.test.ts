@@ -125,3 +125,49 @@ for (const status of [429, 503]) {
     });
   }
 }
+
+// A status that belongs to the target site is never retried. The API returns the
+// target's own status only when the request sets original_status, and treats a status
+// in allowed_status_codes as the target's answer. scrape and extract offer neither
+// parameter and never send it, so every status they see is the API's own and the
+// retry rules apply to it unchanged. If either tool ever gains one of these
+// parameters, these tests fail: the retry must then skip target statuses.
+const TARGET_STATUS_PARAMS = ["original_status", "allowed_status_codes"];
+
+test("scrape and extract offer no parameter that returns the target site's status", async (t) => {
+  const { client } = await harness(t, (_req, res) => res.writeHead(500).end());
+  const { tools } = await client.listTools();
+  for (const name of ["scrape", "extract"]) {
+    const tool = tools.find((x) => x.name === name);
+    assert.ok(tool, `${name} is listed`);
+    const offered = Object.keys(tool.inputSchema.properties ?? {});
+    for (const param of TARGET_STATUS_PARAMS) {
+      assert.ok(!offered.includes(param), `${name} offers ${param}; its statuses must then not be retried`);
+    }
+  }
+});
+
+for (const tool of ["scrape", "extract"]) {
+  test(`${tool}: a caller's original_status or allowed_status_codes never reaches the API`, async (t) => {
+    const urls: string[] = [];
+    const { client, hits } = await harness(t, (req, res) => {
+      urls.push(req.url ?? "");
+      if (urls.length === 1) {
+        res.writeHead(503, { "retry-after": "0", "content-type": "application/json" }).end('{"code":"RESP009"}');
+      } else {
+        res.writeHead(200, { "content-type": "application/json" }).end('{"parsed":{"title":"x"}}');
+      }
+    });
+    const out = (await client.callTool({
+      name: tool,
+      arguments: { url: "https://example.com", original_status: true, allowed_status_codes: "503" },
+    })) as { isError?: boolean };
+    for (const u of urls) {
+      const query = new URL(u, "http://api.invalid").searchParams;
+      for (const param of TARGET_STATUS_PARAMS) assert.equal(query.has(param), false, `${param} sent in ${u}`);
+    }
+    // The 503 is the API's own, so the retry still happens.
+    assert.equal(hits.length, 2);
+    assert.equal(out.isError, undefined);
+  });
+}
