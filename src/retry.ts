@@ -51,10 +51,33 @@ export function retryAfterHeaderMs(header: string | null | undefined): number | 
   return Math.min(CAP_MS, Math.max(FLOOR_MS, Number(value) * 1000));
 }
 
-/** True when a fetch error shows the request was never written to the server. */
+interface CodedError {
+  code?: unknown;
+  syscall?: unknown;
+  errors?: unknown;
+}
+
+/**
+ * One connect attempt that failed: a code above, or an ETIMEDOUT raised by the connect
+ * call itself. An ETIMEDOUT from any other call (a read) may come after the request.
+ */
+function connectFailed(e: CodedError | null | undefined): boolean {
+  const code = e?.code;
+  if (typeof code !== "string") return false;
+  return NOT_SENT_CODES.has(code) || (code === "ETIMEDOUT" && e?.syscall === "connect");
+}
+
+/**
+ * True when a fetch error shows the request was never written to the server. With
+ * happy eyeballs the cause is an AggregateError with one error per address tried; it
+ * counts only when every one of them is a connect failure.
+ */
 export function failedBeforeSend(e: unknown): boolean {
-  const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;
-  return typeof code === "string" && NOT_SENT_CODES.has(code);
+  const cause = (e as { cause?: CodedError } | null)?.cause;
+  if (Array.isArray(cause?.errors)) {
+    return cause.errors.length > 0 && cause.errors.every((inner) => connectFailed(inner as CodedError));
+  }
+  return connectFailed(cause);
 }
 
 /** Reads the retry count from the environment: unset or blank means the default. */

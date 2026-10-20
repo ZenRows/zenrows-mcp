@@ -40,8 +40,19 @@ function recordingSleep() {
 const quiet = { log: () => undefined };
 
 /** The error shape undici gives for a failed connection: TypeError('fetch failed') with a coded cause. */
-function fetchFailed(code: string): TypeError {
-  return new TypeError("fetch failed", { cause: Object.assign(new Error(code), { code }) });
+function fetchFailed(code: string, syscall?: string): TypeError {
+  const cause = Object.assign(new Error(code), syscall === undefined ? { code } : { code, syscall });
+  return new TypeError("fetch failed", { cause });
+}
+
+/**
+ * The shape for a failed happy-eyeballs connect: one error per address tried, wrapped in
+ * an AggregateError that, as in Node, carries the first error's code.
+ */
+function happyEyeballsFailed(...inner: Array<[code: string, syscall: string]>): TypeError {
+  const errors = inner.map(([code, syscall]) => Object.assign(new Error(code), { code, syscall }));
+  const cause = Object.assign(new AggregateError(errors), errors.length ? { code: errors[0].code } : {});
+  return new TypeError("fetch failed", { cause });
 }
 
 async function listen(handler: http.RequestListener): Promise<{ server: http.Server; base: string }> {
@@ -175,6 +186,71 @@ test("only a connection that failed before sending is retried", async () => {
     );
     assert.equal(calls.length, 1, `${(error as { cause?: { code?: string } }).cause?.code ?? error.name} was retried`);
   }
+});
+
+test("a connect timeout on every address family is retried; any other mix is not", async () => {
+  const retried: Array<[string, TypeError]> = [
+    ["refused x2", happyEyeballsFailed(["ECONNREFUSED", "connect"], ["ECONNREFUSED", "connect"])],
+    ["connect timeout x2", happyEyeballsFailed(["ETIMEDOUT", "connect"], ["ETIMEDOUT", "connect"])],
+    ["refused + connect timeout", happyEyeballsFailed(["ECONNREFUSED", "connect"], ["ETIMEDOUT", "connect"])],
+    ["single connect timeout", fetchFailed("ETIMEDOUT", "connect")],
+  ];
+  for (const [name, error] of retried) {
+    assert.equal(failedBeforeSend(error), true, name);
+    const { fetchImpl, calls } = scripted(error, 200);
+    const res = await fetchWithRetry(() => fetchImpl("u"), { sleep: recordingSleep().sleep, ...quiet });
+    assert.equal(res.status, 200, name);
+    assert.equal(calls.length, 2, name);
+  }
+  const final: Array<[string, TypeError]> = [
+    ["read timeout", fetchFailed("ETIMEDOUT", "read")],
+    ["read timeout x2", happyEyeballsFailed(["ETIMEDOUT", "read"], ["ETIMEDOUT", "read"])],
+    ["refused + reset", happyEyeballsFailed(["ECONNREFUSED", "connect"], ["ECONNRESET", "read"])],
+    ["ETIMEDOUT with no syscall", fetchFailed("ETIMEDOUT")],
+    ["empty AggregateError", happyEyeballsFailed()],
+  ];
+  for (const [name, error] of final) {
+    assert.equal(failedBeforeSend(error), false, name);
+    const { fetchImpl, calls } = scripted(error, 200);
+    await assert.rejects(
+      fetchWithRetry(() => fetchImpl("u"), { sleep: recordingSleep().sleep, ...quiet }),
+      error
+    );
+    assert.equal(calls.length, 1, `${name} was retried`);
+  }
+});
+
+test("an abort is never retried, even when the attempt failed with a connect timeout", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const doFetch = async () => {
+    calls++;
+    controller.abort(new Error("client cancelled"));
+    throw happyEyeballsFailed(["ETIMEDOUT", "connect"], ["ETIMEDOUT", "connect"]);
+  };
+  const { waits, sleep } = recordingSleep();
+  await assert.rejects(fetchWithRetry(doFetch, { signal: controller.signal, sleep, ...quiet }), /client cancelled/);
+  assert.equal(calls, 1);
+  assert.deepEqual(waits, []);
+});
+
+// `localhost` can resolve to both ::1 and 127.0.0.1. Then Node tries each family and
+// reports an AggregateError; with one address it reports a single error.
+test("real connection refused on localhost is retried", async () => {
+  const { server, base } = await listen(() => undefined);
+  await close(server);
+  const url = base.replace("127.0.0.1", "localhost");
+  let calls = 0;
+  const err = await fetchWithRetry(
+    () => {
+      calls++;
+      return fetch(url);
+    },
+    { sleep: recordingSleep().sleep, ...quiet }
+  ).catch((e: unknown) => e);
+  const cause = (err as { cause?: { code?: string; errors?: Array<{ code?: string }> } }).cause;
+  for (const inner of cause?.errors ?? [cause]) assert.equal(inner?.code, "ECONNREFUSED");
+  assert.equal(calls, 3);
 });
 
 test("real connection refused is retried", async () => {
