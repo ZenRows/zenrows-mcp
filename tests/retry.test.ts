@@ -249,15 +249,45 @@ test("retries: 0 disables retrying", async () => {
   assert.equal(calls.length, 1);
 });
 
-test("no retry starts past the budget", async () => {
+/** A fake clock that the sleep advances, so a budget test takes no real time. */
+function fakeClock() {
   let clock = 0;
+  return { now: () => clock, sleep: async (ms: number) => void (clock += ms) };
+}
+
+test("no retry starts past the budget", async () => {
+  const clock = fakeClock();
   const { fetchImpl, calls } = scripted({ status: 503, retryAfter: "30" });
-  const sleep = async (ms: number) => void (clock += ms);
-  const res = await fetchWithRetry(() => fetchImpl("u"), { retries: 10, sleep, now: () => clock, ...quiet });
+  const res = await fetchWithRetry(() => fetchImpl("u"), { retries: 10, ...clock, ...quiet });
   assert.equal(res.status, 503);
-  // 30 s waits fit three times in the 90 s budget; the fourth would exceed it.
-  assert.equal(calls.length, FETCH_RETRY_BUDGET_MS / 30_000 + 1);
-  assert.ok(clock <= FETCH_RETRY_BUDGET_MS);
+  // A 30 s wait fits once in the budget; a second would start the next try at 60 s.
+  assert.equal(calls.length, 2);
+  assert.equal(clock.now(), 30_000);
+  assert.ok(clock.now() <= FETCH_RETRY_BUDGET_MS);
+});
+
+// MCP clients cancel a tool call at about 60 s, and the hosted server never sees that
+// cancel. The default budget must end before then, so no retry is sent to a gone client.
+test("the default budget starts no retry at or after 60 s", async () => {
+  const clock = fakeClock();
+  const { fetchImpl, calls } = scripted({ status: 503, retryAfter: "20" });
+  await fetchWithRetry(() => fetchImpl("u"), { retries: 10, ...clock, ...quiet });
+  // Tries start at 0, 20 and 40 s. A try at 60 s would reach the API after the client left.
+  assert.equal(calls.length, 3);
+  assert.equal(clock.now(), 40_000);
+});
+
+test("extract uses the default budget", async () => {
+  const clock = fakeClock();
+  const { fetchImpl, calls } = scripted({ status: 503, retryAfter: "20" });
+  const out = await runExtract(
+    "k",
+    { url: "https://example.com/p" },
+    { fetchImpl, retry: { retries: 10, ...clock, ...quiet } }
+  );
+  assert.equal(out.ok, false);
+  assert.equal(calls.length, 3);
+  assert.equal(clock.now(), 40_000);
 });
 
 test(`${FETCH_RETRIES_ENV} sets the retry count and rejects a bad value`, () => {

@@ -7,8 +7,13 @@
  */
 export const FETCH_RETRIES = 2;
 export const FETCH_RETRY_STATUSES: ReadonlySet<number> = new Set([429, 502, 503, 504]);
-/** No retry starts once the next wait would take the call past this. */
-export const FETCH_RETRY_BUDGET_MS = 90_000;
+/**
+ * No retry starts once the next wait would take the call past this. MCP clients cancel
+ * a tool call at about 60 s, and the hosted server never receives that cancel: each POST
+ * gets its own transport. So the budget ends before the client leaves, like the 50 s
+ * wait of the crawl and batch tools.
+ */
+export const FETCH_RETRY_BUDGET_MS = 50_000;
 /** Environment variable that sets the retry count; 0 sends each call once. */
 export const FETCH_RETRIES_ENV = "ZENROWS_FETCH_RETRIES";
 const BASE_MS = 1_000;
@@ -99,7 +104,7 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
 /**
  * Calls doFetch with the caller's signal, retrying a retryable status or a connection
  * that failed before sending, with full-jitter backoff. A whole-seconds Retry-After
- * replaces the backoff. No retry starts after the budget (90 s by default), and none
+ * replaces the backoff. No retry starts after the budget (50 s by default), and none
  * starts once the signal aborts. Returns the last response, or rethrows the last error.
  */
 export async function fetchWithRetry(
