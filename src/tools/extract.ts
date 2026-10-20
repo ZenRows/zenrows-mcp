@@ -4,6 +4,7 @@ import { z } from "zod";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { fetchWithRetry, type RetryOptions } from "../retry.js";
+import { normalizeDomain, PAGE_NOT_RECOGNISED_STEPS, POLL_INTERVAL_SECONDS } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
@@ -35,19 +36,20 @@ export function zrErrorCode(body: string): string | undefined {
 }
 
 /**
- * True when the result carries no usable value: null, "", [], {}, or an object whose
- * every field is itself empty (e.g. `{ listings: [] }` from a page that didn't load).
+ * True when the result carries no usable value: null, "", or an array / object whose
+ * every value is itself empty (e.g. `{ listings: [{ title: null }] }` from a page that
+ * didn't load). Numbers and booleans are values, so 0 and false count as data.
  */
 export function isEmptyData(data: unknown): boolean {
   if (data === null || data === undefined) return true;
-  if (Array.isArray(data)) return data.length === 0;
+  if (Array.isArray(data)) return data.every(isEmptyData);
   if (typeof data === "object") return Object.values(data as object).every(isEmptyData);
   if (typeof data === "string") return data.trim() === "";
   return false;
 }
 
-/** Errors on extract=auto that the autoparse fallback can recover from. */
-function isExtractUnavailable(status: number, body: string): boolean {
+/** Extract has not prepared the domain yet: REQS007, or the legacy AUTH010. */
+function isDomainNotPrepared(status: number, body: string): boolean {
   const code = zrErrorCode(body);
   // REQS007: domain not prepared for Extract yet. AUTH010: legacy domain-not-enabled code.
   return (status === 402 && code === "AUTH010") || (status === 403 && code === "REQS007");
@@ -66,6 +68,73 @@ const NO_DATA_MESSAGE =
   "Extract found no data on this page (not charged). Check that the page rendered fully: " +
   "set js_render with wait_for, or premium_proxy on protected sites.";
 
+/** Why a REQS007 refused, as the gateway's `reason` field names it. */
+export type RefusalReason = "domain_not_prepared" | "page_not_recognised" | "domain_not_enabled";
+
+const REFUSAL_REASONS: readonly RefusalReason[] = ["domain_not_prepared", "page_not_recognised", "domain_not_enabled"];
+
+/**
+ * Which REQS007 this is. Only domain_not_prepared is fixed by preparing the domain: on
+ * page_not_recognised the domain is already prepared, and resubmitting it returns the
+ * existing ready record, so pointing there would loop.
+ *
+ * The gateway says it in the problem's `reason` field, read first. The sentence match
+ * below is only the fallback for a gateway deployed before that field existed, and
+ * reads the titles that gateway sends; remove it once every gateway sends `reason`.
+ */
+export function refusalReason(body: string): RefusalReason {
+  let j: { reason?: unknown; title?: unknown; detail?: unknown } = {};
+  try {
+    j = JSON.parse(body) as typeof j;
+  } catch {
+    return "domain_not_prepared";
+  }
+  if (typeof j.reason === "string" && (REFUSAL_REASONS as readonly string[]).includes(j.reason)) {
+    return j.reason as RefusalReason;
+  }
+  const title = typeof j.title === "string" ? j.title : "";
+  const detail = typeof j.detail === "string" ? j.detail : "";
+  if (/did not recogni[sz]e this page/i.test(title) || /^Extract serves /.test(detail)) return "page_not_recognised";
+  if (/^Extract is not enabled/i.test(title)) return "domain_not_enabled";
+  return "domain_not_prepared";
+}
+
+/**
+ * The tool error for REQS007 / AUTH010 on mode=auto. It names the next step for its
+ * reason, because agents copy it, and never offers autoparse.
+ */
+export function domainNotPreparedError(url: string, status: number, body: string): string {
+  const domain = normalizeDomain(url);
+  const reason = refusalReason(body);
+  const common = { code: zrErrorCode(body) ?? "REQS007", reason, status, detail: body.slice(0, 500) };
+  if (reason === "page_not_recognised") {
+    return JSON.stringify({
+      ...common,
+      message:
+        `Extract serves ${domain} but did not recognise this page as one it can extract (it may be a page with ` +
+        `nothing to extract, such as a home page). ${PAGE_NOT_RECOGNISED_STEPS} The request was not charged.`,
+    });
+  }
+  if (reason === "domain_not_enabled") {
+    return JSON.stringify({
+      ...common,
+      message:
+        `Extract is not enabled for ${domain}, and preparing it does not change this. Use mode=css with a ` +
+        "css_extractor, or contact Zenrows support to have the site enabled.",
+    });
+  }
+  return JSON.stringify({
+    ...common,
+    message:
+      `Extract hasn't prepared ${domain} yet. Call prepare_domain with domain "${domain}" and 1 to 5 example URLs ` +
+      "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css.",
+    next_tool: { name: "prepare_domain", arguments: { domain, example_urls: [url] } },
+    then:
+      `Call prepared_domain_status with domain "${domain}" about every ${POLL_INTERVAL_SECONDS} seconds until status ` +
+      "is ready, then call extract again.",
+  });
+}
+
 export type ExtractMode = "auto" | "autoparse" | "css";
 
 export type ExtractStealthOpts = {
@@ -82,12 +151,12 @@ export type ExtractInput = ExtractStealthOpts & {
   url: string;
   mode?: ExtractMode;
   fallback_autoparse?: boolean;
+  include_html?: boolean;
 };
 
 export type ExtractSuccess = {
   ok: true;
   mode: ExtractMode;
-  fellBackToAutoparse: boolean;
   empty: boolean;
   data: unknown;
   html?: string;
@@ -95,6 +164,8 @@ export type ExtractSuccess = {
   /** Set when Extract answered 422 no_data_extracted; `empty` is true too. */
   noDataExtracted?: boolean;
   message?: string;
+  /** Set when the caller sent the deprecated fallback_autoparse: true. */
+  note?: string;
 };
 
 export type ExtractFailure = {
@@ -158,31 +229,61 @@ async function callZenrows(
   return { ok: response.ok, status: response.status, body: await response.text() };
 }
 
+/** The note a result carries when the caller sent fallback_autoparse: true. */
+export const FALLBACK_AUTOPARSE_NOTE =
+  "fallback_autoparse was ignored: it is deprecated and has no effect, because Extract no longer falls back to autoparse. " +
+  "On REQS007 with reason domain_not_prepared, prepare the domain with prepare_domain instead.";
+
+export type RunExtractOptions = {
+  getClientName?: () => string | undefined;
+  fetchImpl?: typeof fetch;
+  /** Retry policy for the API call; tests inject sleep and randomness here. */
+  retry?: RetryOptions;
+  /** The MCP request's cancel signal: once it aborts, no retry starts and the running attempt ends. */
+  signal?: AbortSignal;
+};
+
 /**
- * Core extract logic (testable). When extract=auto isn't available for the domain
- * (AUTH010 or REQS007), retries once with autoparse unless fallback_autoparse is false.
+ * Core extract logic (testable). One logical request: fetchWithRetry sends it again
+ * only when the API did not serve it (429, 502, 503, 504, or a connection that failed
+ * before sending). When Extract refuses the page (REQS007, or the legacy AUTH010),
+ * returns an error naming the next step for its reason; that refusal is never retried.
+ * fallback_autoparse is accepted and ignored; when it is true the result says so.
+ * The page HTML is returned only when include_html is true.
  */
 export async function runExtract(
   apiKey: string,
   params: ExtractInput,
-  options: {
-    getClientName?: () => string | undefined;
-    fetchImpl?: typeof fetch;
-    /** Retry policy for the API calls; tests inject sleep and randomness here. */
-    retry?: RetryOptions;
-    /** The MCP request's cancel signal: once it aborts, no retry or fallback request starts. */
-    signal?: AbortSignal;
-  } = {}
+  options: RunExtractOptions = {}
+): Promise<ExtractSuccess | ExtractFailure> {
+  const outcome = await runExtractOnce(apiKey, params, options);
+  if (params.fallback_autoparse !== true) return outcome;
+  return outcome.ok
+    ? { ...outcome, note: FALLBACK_AUTOPARSE_NOTE }
+    : { ok: false, errorText: withNote(outcome.errorText) };
+}
+
+/** Adds the fallback_autoparse note to an error: as a `note` field when the error is a JSON object, else as a last line. */
+function withNote(errorText: string): string {
+  try {
+    const parsed: unknown = JSON.parse(errorText);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return JSON.stringify({ ...parsed, note: FALLBACK_AUTOPARSE_NOTE });
+    }
+  } catch {
+    // Not JSON: a plain-text error such as a network failure.
+  }
+  return `${errorText}\n${FALLBACK_AUTOPARSE_NOTE}`;
+}
+
+async function runExtractOnce(
+  apiKey: string,
+  params: ExtractInput,
+  options: RunExtractOptions = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const getClientName = options.getClientName ?? (() => undefined);
   const fetchImpl = options.fetchImpl ?? fetch;
-  // One budget for the whole tool call: the autoparse fallback shares the first call's start.
-  const retry: RetryOptions = {
-    label: "extract",
-    signal: options.signal,
-    ...options.retry,
-    startedAt: options.retry?.startedAt ?? (options.retry?.now ?? Date.now)(),
-  };
+  const retry: RetryOptions = { label: "extract", signal: options.signal, ...options.retry };
   const mode: ExtractMode = params.mode ?? "auto";
 
   if (mode === "css" && !params.css_extractor) {
@@ -205,8 +306,7 @@ export async function runExtract(
     wait: params.wait,
   };
 
-  let usedMode: ExtractMode = mode;
-  let result = await callZenrows(
+  const result = await callZenrows(
     apiKey,
     buildExtractParams(apiKey, params.url, mode, opts),
     getClientName,
@@ -214,34 +314,19 @@ export async function runExtract(
     retry
   );
 
-  let fellBackToAutoparse = false;
-  if (
-    !result.ok &&
-    mode === "auto" &&
-    params.fallback_autoparse !== false &&
-    isExtractUnavailable(result.status, result.body)
-  ) {
-    usedMode = "autoparse";
-    fellBackToAutoparse = true;
-    result = await callZenrows(
-      apiKey,
-      buildExtractParams(apiKey, params.url, "autoparse", opts),
-      getClientName,
-      fetchImpl,
-      retry
-    );
-  }
-
-  if (usedMode === "auto" && isNoDataExtracted(result.status, result.body)) {
+  if (mode === "auto" && isNoDataExtracted(result.status, result.body)) {
     return {
       ok: true,
-      mode: usedMode,
-      fellBackToAutoparse,
+      mode,
       empty: true,
       data: null,
       noDataExtracted: true,
       message: NO_DATA_MESSAGE,
     };
+  }
+
+  if (!result.ok && mode === "auto" && isDomainNotPrepared(result.status, result.body)) {
+    return { ok: false, errorText: domainNotPreparedError(params.url, result.status, result.body) };
   }
 
   if (!result.ok) {
@@ -254,7 +339,7 @@ export async function runExtract(
               code: zrErrorCode(result.body) ?? "EXTRACT_FAILED",
               message: `Zenrows error ${result.status}`,
               detail: result.body.slice(0, 500),
-              mode: usedMode,
+              mode,
             }),
     };
   }
@@ -265,8 +350,7 @@ export async function runExtract(
   } catch {
     return {
       ok: true,
-      mode: usedMode,
-      fellBackToAutoparse,
+      mode,
       empty: true,
       data: null,
       raw: result.body,
@@ -275,18 +359,18 @@ export async function runExtract(
 
   let data: unknown = parsed;
   let html: string | undefined;
-  if (usedMode === "auto" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+  if (mode === "auto" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
     const envelope = parsed as { parsed?: unknown; html?: unknown };
     if ("parsed" in envelope) {
       data = envelope.parsed;
-      html = typeof envelope.html === "string" ? envelope.html : undefined;
+      // The page HTML is most of the response; return it only when asked for.
+      html = params.include_html === true && typeof envelope.html === "string" ? envelope.html : undefined;
     }
   }
 
   return {
     ok: true,
-    mode: usedMode,
-    fellBackToAutoparse,
+    mode,
     empty: isEmptyData(data),
     data,
     ...(html !== undefined ? { html } : {}),
@@ -317,12 +401,22 @@ export function registerExtractTool(server: McpServer, apiKey: KeyRef, getClient
       },
       description: `Extract structured data from a webpage via Zenrows.
 
-Returns JSON fields (products, articles, listings) rather than a full page body.
+Returns JSON fields (products, articles, listings) in "data" rather than a full
+page body. Set include_html to also get the page HTML.
 Modes:
 - auto (default): extract=auto, site-tailored Extract (currently free,
-  billing may apply later). Works on any domain Zenrows has prepared, with any
-  API key; falls back to autoparse when the domain isn't prepared yet (REQS007)
-- autoparse: general-purpose structured JSON on any domain
+  billing may apply later). Works on any prepared domain, with any API key.
+  Error REQS007 says why in "reason":
+  - domain_not_prepared: call prepare_domain with the domain and 1 to 5 example
+    URLs (a few minutes, no credits), poll prepared_domain_status about every
+    30 seconds until it says ready, then call extract again.
+  - page_not_recognised: the domain is prepared, but this page is not one
+    Extract extracts (a page with nothing to extract, such as a home page). Try a product,
+    article or listing page instead; if this page should work, retry it once in
+    a few minutes; otherwise use mode=css. Do not prepare the domain again.
+  - domain_not_enabled: preparing does not help; use mode=css.
+- autoparse: deprecated general-purpose structured JSON on any domain; use only
+  when asked for
 - css: css_extractor with an explicit selector map
 
 Requests use automatic mode (mode=auto) by default: Zenrows enables JS rendering and
@@ -341,7 +435,9 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .enum(["auto", "autoparse", "css"])
           .nullish()
           .default("auto")
-          .describe("Extraction mode: auto (extract=auto, default), autoparse, or css (requires css_extractor)"),
+          .describe(
+            "Extraction mode: auto (extract=auto, default), css (requires css_extractor), or the deprecated autoparse"
+          ),
         css_extractor: z
           .string()
           .nullish()
@@ -389,9 +485,15 @@ Full-page markdown, HTML and screenshots come from scrape.`,
         fallback_autoparse: z
           .boolean()
           .nullish()
-          .default(true)
           .describe(
-            "When mode=auto and the domain isn't prepared for Extract yet (REQS007, or the legacy AUTH010), retry once with autoparse (default true)"
+            "Deprecated, has no effect: Extract no longer falls back to autoparse. Prepare the domain with prepare_domain instead."
+          ),
+        include_html: z
+          .boolean()
+          .nullish()
+          .default(false)
+          .describe(
+            "mode=auto only: also return the full page HTML. Default false; the HTML is most of the response size."
           ),
       },
     },
@@ -401,12 +503,12 @@ Full-page markdown, HTML and screenshots come from scrape.`,
       return json({
         ok: true,
         mode: outcome.mode,
-        fellBackToAutoparse: outcome.fellBackToAutoparse,
         empty: outcome.empty,
         data: outcome.data,
         ...(outcome.html !== undefined ? { html: outcome.html } : {}),
         ...(outcome.raw !== undefined ? { raw: outcome.raw } : {}),
         ...(outcome.noDataExtracted ? { noDataExtracted: true, message: outcome.message } : {}),
+        ...(outcome.note !== undefined ? { note: outcome.note } : {}),
       });
     }
   );

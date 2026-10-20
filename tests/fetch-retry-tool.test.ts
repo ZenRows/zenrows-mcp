@@ -97,3 +97,31 @@ for (const tool of ["scrape", "extract"]) {
     assert.ok(closedAt !== undefined && closedAt < 1_000, `connection closed at ${closedAt} ms`);
   });
 }
+
+// On the prepared-domains endpoints a 429 (allowance used up) and a 503 (preparation
+// unavailable) are answers for the agent to read, not busy signals: never resend them.
+for (const status of [429, 503]) {
+  for (const [tool, args, expected] of [
+    ["prepare_domain", { domain: "example.com", example_urls: ["https://example.com/p/1"] }, 1],
+    ["prepared_domain_status", { domain: "example.com" }, 2],
+  ] as const) {
+    test(`${tool}: a ${status} is returned on the first attempt`, async (t) => {
+      const paths: string[] = [];
+      const { client, hits, retryLines } = await harness(t, (req, res) => {
+        paths.push(`${req.method} ${req.url}`);
+        res.writeHead(status, { "retry-after": "0", "content-type": "application/json" }).end("{}");
+      });
+      const out = (await client.callTool({ name: tool, arguments: args })) as {
+        content: Array<{ text: string }>;
+        isError?: boolean;
+      };
+      await wait(600);
+      assert.equal(out.isError, true);
+      assert.equal(JSON.parse(out.content[0].text).status, status);
+      // prepared_domain_status reads the domain and the allowance: one request each.
+      assert.equal(hits.length, expected, `requests: ${paths.join(", ")}`);
+      assert.equal(new Set(paths).size, expected, `a path was sent twice: ${paths.join(", ")}`);
+      assert.deepEqual(retryLines(), []);
+    });
+  }
+}

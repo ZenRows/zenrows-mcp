@@ -260,18 +260,6 @@ test("no retry starts past the budget", async () => {
   assert.ok(clock <= FETCH_RETRY_BUDGET_MS);
 });
 
-test("startedAt carries an earlier budget start into a later call", async () => {
-  const clock = 80_000;
-  const { fetchImpl, calls } = scripted({ status: 503, retryAfter: "30" }, 200);
-  await fetchWithRetry(() => fetchImpl("u"), {
-    startedAt: 0,
-    now: () => clock,
-    sleep: recordingSleep().sleep,
-    ...quiet,
-  });
-  assert.equal(calls.length, 1);
-});
-
 test(`${FETCH_RETRIES_ENV} sets the retry count and rejects a bad value`, () => {
   assert.equal(retriesFromEnv(undefined), 2);
   assert.equal(retriesFromEnv(""), 2);
@@ -431,44 +419,13 @@ test("runExtract retries a 503 and serves the retry", async () => {
   assert.equal(calls.length, 2);
 });
 
-const REQS007 = { status: 403, body: JSON.stringify({ code: "REQS007", detail: "not prepared" }) };
-
-test("the autoparse fallback call is retried too", async () => {
-  const { fetchImpl, calls } = scripted(REQS007, 503, 200);
-  const outcome = await runExtract(
-    "k",
-    { url: "https://example.com" },
-    { fetchImpl, retry: { sleep: recordingSleep().sleep, ...quiet } }
-  );
-  assert.equal(outcome.ok, true);
-  assert.equal(outcome.ok && outcome.mode, "autoparse");
-  assert.equal(calls.length, 3);
-});
-
-test("the autoparse fallback shares the first call's budget", async () => {
-  let clock = 0;
-  const thirty = { status: 503, retryAfter: "30" };
-  // First call: three 30 s waits use the whole 90 s budget, then REQS007 triggers the fallback.
-  const { fetchImpl, calls } = scripted(thirty, thirty, thirty, REQS007, thirty, 200);
-  const sleep = async (ms: number) => void (clock += ms);
-  const outcome = await runExtract(
-    "k",
-    { url: "https://example.com" },
-    { fetchImpl, retry: { retries: 10, sleep, now: () => clock, ...quiet } }
-  );
-  assert.equal(outcome.ok, false);
-  // 4 first-call requests plus 1 fallback request: the fallback had no budget left to retry.
-  assert.equal(calls.length, 5);
-  assert.equal(clock, 90_000);
-});
-
-test("runExtract sends no fallback once the call is cancelled", async () => {
+test("runExtract sends no retry once the call is cancelled", async () => {
   const controller = new AbortController();
   const calls: number[] = [];
   const fetchImpl = (async () => {
     calls.push(calls.length);
     controller.abort(new Error("cancelled"));
-    return new Response(REQS007.body, { status: 403 });
+    return new Response("busy", { status: 503 });
   }) as typeof fetch;
   await runExtract("k", { url: "https://example.com" }, { fetchImpl, signal: controller.signal, retry: quiet });
   assert.equal(calls.length, 1);

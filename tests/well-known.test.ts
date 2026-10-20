@@ -147,3 +147,15 @@ test("the server card describes the server the way npm and the MCP Registry do",
     assert.doesNotMatch(String(json.description), /stealth|anti-?bot|bypass|protected/i, path);
   }
 });
+
+test("the OpenAI apps challenge is served as plain text", async () => {
+  const response = await handler({
+    requestContext: { http: { method: "GET" } },
+    rawPath: "/.well-known/openai-apps-challenge",
+    headers: {},
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.match(String(response.headers?.["content-type"]), /^text\/plain/);
+  assert.equal(response.body, "YzMDllJ36qCX2SecyZoIX9OVVlQTCimoiSvrR3b7CP0");
+});

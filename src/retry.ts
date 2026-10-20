@@ -67,8 +67,6 @@ const configuredRetries = retriesFromEnv(process.env[FETCH_RETRIES_ENV]);
 export interface RetryOptions {
   retries?: number;
   budgetMs?: number;
-  /** Start of the budget. A follow-up call that belongs to the same tool call passes the first call's start. */
-  startedAt?: number;
   /** The caller's cancel signal. Once it aborts, no new attempt starts and the wait ends at once. */
   signal?: AbortSignal;
   /** Names the tool in the retry log line. */
@@ -114,7 +112,7 @@ export async function fetchWithRetry(
   const now = opts.now ?? Date.now;
   const log = opts.log ?? defaultLog;
   const { signal } = opts;
-  const start = opts.startedAt ?? now();
+  const start = now();
   for (let attempt = 0; ; attempt++) {
     signal?.throwIfAborted();
     let res: Response | undefined;
