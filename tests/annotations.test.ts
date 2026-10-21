@@ -43,7 +43,7 @@ for (const hosted of [false, true]) {
   });
 }
 
-test("tools that delete or overwrite browser state are marked destructive", async () => {
+test("tools that can delete or overwrite browser state are marked destructive", async () => {
   const tools = await listTools(true);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
   for (const name of [
@@ -51,6 +51,8 @@ test("tools that delete or overwrite browser state are marked destructive", asyn
     "browser_clear_local_storage",
     "browser_set_cookies",
     "browser_set_local_storage",
+    "browser_evaluate",
+    "browser_batch",
   ]) {
     assert.equal(byName.get(name)?.annotations?.destructiveHint, true, name);
   }

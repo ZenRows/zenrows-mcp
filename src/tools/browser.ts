@@ -797,8 +797,9 @@ labels, and states — everything needed to drive browser interactions.`,
   server.registerTool(
     "browser_evaluate",
     {
-      annotations: { title: "Evaluate JavaScript", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: "Execute JavaScript in the browser context and return the result.",
+      annotations: { title: "Evaluate JavaScript", readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+      description:
+        "Execute JavaScript in the browser context and return the result. The script can change or delete the session's page state, such as cookies, storage and form data.",
       inputSchema: {
         session_id: sessionId,
         script: z.string().describe("JavaScript expression or function body to evaluate in the page context"),
@@ -1247,7 +1248,7 @@ labels, and states — everything needed to drive browser interactions.`,
       annotations: {
         title: "Run Batch of Browser Actions",
         readOnlyHint: false,
-        destructiveHint: false,
+        destructiveHint: true,
         openWorldHint: true,
       },
       description: `Execute a sequence of browser actions in a single call against an existing session.
@@ -1259,7 +1260,10 @@ Actions run sequentially and stop at the first failure unless stop_on_error is f
 Each step result is returned in the results array at the same index.
 
 Note: screenshots in batch results are returned as base64 strings inside the JSON;
-browser_screenshot returns them as images.`,
+browser_screenshot returns them as images.
+
+A batch can include evaluate, so it can change or delete page state the same way
+browser_evaluate can.`,
       inputSchema: {
         session_id: sessionId,
         actions: z
