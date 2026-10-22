@@ -32,7 +32,7 @@ Zenrows MCP supports two transport options. Both expose the same set of tools an
 **What works without a key:**
 
 - **Local (`npx @zenrows/mcp`):** no signup, no key. The first tool call creates a Free account (5,000 credits/month) that you can claim later, keeping the key and its usage. Opt out with `ZENROWS_AUTO_SIGNUP=false`. In CI, set `ZENROWS_API_KEY` as a secret or persist `ZENROWS_HOME` between runs.
-- **Remote (`https://mcp.zenrows.com/mcp`):** `initialize` and `tools/list` answer without a key; tool calls need one (OAuth in clients that support it, or a Bearer key). The remote server never creates accounts by itself. A headless agent can create a Free account with `POST https://app.zenrows.com/api/agent/signup` and use the returned `apiKey` as the Bearer token.
+- **Remote (`https://mcp.zenrows.com/mcp`):** `initialize` and `tools/list` answer without a key; tool calls need one (OAuth in clients that support it, or a Bearer key). The remote server never creates accounts by itself. A headless agent can create a Free account with `POST https://app.zenrows.com/api/agent/signup` and use the returned `apiKey` as the Bearer token. The endpoint may first answer `428` with a short question; POST `{"challenge_id": "...", "answer": "..."}` back to the same URL to get the key.
 
 ### Remote MCP server
 
@@ -54,7 +54,7 @@ Authorization: Bearer YOUR_ZENROWS_API_KEY
 
 Most MCP clients accept this through an `authorization` shorthand field on the tool config and forward it as the Bearer token automatically. Some clients use a free-form `headers` field instead. Either approach works.
 
-> Remote MCP does **not** auto-create accounts. `initialize` and `tools/list` work without a key; a keyless tool call gets a 401 whose body names the signup endpoint (`agent_signup`). Use OAuth “Create Free account” in the client, pass an existing API key, or, from a headless agent, `POST https://app.zenrows.com/api/agent/signup` (anonymous, returns `apiKey`; per-network limits apply) and retry with `Authorization: Bearer <apiKey>`.
+> Remote MCP does **not** auto-create accounts. `initialize` and `tools/list` work without a key; a keyless tool call gets a 401 whose body names the signup endpoint (`agent_signup`). Use OAuth “Create Free account” in the client, pass an existing API key, or, from a headless agent, `POST https://app.zenrows.com/api/agent/signup` (anonymous; returns `apiKey`, or first a `428` question to answer with `challenge_id` and `answer`; per-network limits apply) and retry with `Authorization: Bearer <apiKey>`.
 
 #### Example: OpenAI Responses API
 
@@ -95,7 +95,7 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 
 1. `ZENROWS_API_KEY` environment variable, or
 2. Key previously stored in `~/.zenrows/secrets.json`, or
-3. **Auto-signup** (default): if neither is set, the server still starts, and the first tool call provisions a Free plan account via `POST /api/agent/signup`, persists the key + claim metadata under `~/.zenrows/` (`secrets.json` + `account.json`, mode `0600`), and prints a claim URL on stderr. If signup is refused (for example the per-network cap in CI), that tool call returns an error saying when to retry; in CI, set `ZENROWS_API_KEY` as a secret or persist `ZENROWS_HOME` between runs. Opt out with `ZENROWS_AUTO_SIGNUP=false`: tool calls then return an error until a key is set. The signup request also sends a random per-machine id (shared with the Zenrows CLI) and a guess at the host agent (`claude-code`, `cursor`, …) so signups can be attributed; set `ZENROWS_TELEMETRY=off` to omit both.
+3. **Auto-signup** (default): if neither is set, the server still starts, and the first tool call provisions a Free plan account via `POST /api/agent/signup`, persists the key + claim metadata under `~/.zenrows/` (`secrets.json` + `account.json`, mode `0600`), and prints a claim URL on stderr. Zenrows may first ask a short question: the tool call then returns it, and the agent answers with the `account_signup_answer` tool, then retries. If signup is refused (for example the per-network cap in CI), that tool call returns an error saying when to retry; in CI, set `ZENROWS_API_KEY` as a secret or persist `ZENROWS_HOME` between runs. Opt out with `ZENROWS_AUTO_SIGNUP=false`: tool calls then return an error until a key is set. The signup request also sends a random per-machine id (shared with the Zenrows CLI) and a guess at the host agent (`claude-code`, `cursor`, …) so signups can be attributed; set `ZENROWS_TELEMETRY=off` to omit both.
 
 **Requirements:** [Node.js](https://nodejs.org/) installed (for `npx` to work).
 

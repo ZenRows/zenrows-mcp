@@ -33,7 +33,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Bearer <ZENROWS_API_KEY> or OAuth. Needed for tool calls only. No auto-signup; agents can POST https://app.zenrows.com/api/agent/signup for a key.",
+          "description": "Bearer <ZENROWS_API_KEY> or OAuth. Needed for tool calls only. No auto-signup; agents can POST https://app.zenrows.com/api/agent/signup for a key (it may ask a short question first).",
           "isRequired": false,
           "isSecret": true
         }

@@ -96,6 +96,11 @@ export interface ServerOptions {
    * name; throws an error whose message is the tool error to return.
    */
   ensureKey?: (clientName?: string) => Promise<string>;
+  /**
+   * stdio: send the agent's answer to a pending signup question. Registers the
+   * account_signup_answer tool, which works without a key.
+   */
+  answerSignup?: (answer: string, clientName?: string) => Promise<{ text: string; isError: boolean }>;
 }
 
 export function createServer(apiKey: KeyRef, clientName?: string, options: ServerOptions = {}): McpServer {
@@ -110,6 +115,33 @@ export function createServer(apiKey: KeyRef, clientName?: string, options: Serve
   // Resolve client name: prefer explicit value (HTTP stateless path),
   // fall back to MCP handshake (stdio/persistent connection path).
   const getClientName = () => clientName ?? server.server.getClientVersion()?.name;
+
+  // Registered before gateTools so it runs without a key: it is how the key gets created.
+  const answerSignup = options.answerSignup;
+  if (answerSignup) {
+    server.registerTool(
+      "account_signup_answer",
+      {
+        annotations: {
+          title: "Answer Signup Question",
+          readOnlyHint: false,
+          destructiveHint: false,
+          openWorldHint: true,
+        },
+        description:
+          "Answer the question Zenrows asks before it creates a free account. Use it only when another Zenrows tool " +
+          "reports a signup question: answer that question yourself and pass the answer here. On success the API key " +
+          "is stored and you can retry the original tool call.",
+        inputSchema: {
+          answer: z.string().max(200).describe("Your answer to the signup question, as plain text."),
+        },
+      },
+      async ({ answer }) => {
+        const r = await answerSignup(answer, getClientName());
+        return { content: [{ type: "text" as const, text: r.text }], ...(r.isError ? { isError: true } : {}) };
+      }
+    );
+  }
 
   if (options.ensureKey) gateTools(server, options.ensureKey, getClientName, () => keyOf(apiKey));
 
