@@ -241,7 +241,7 @@ export function signupErrorMessage(err: AuthError, opts: { retryInSec: number; c
   }
   if (err.code === "SIGNUP_CHALLENGE_LOCKED") {
     return (
-      `Too many wrong answers to the Zenrows signup question from this network. Try again in ${humanDuration(opts.retryInSec)} (${opts.retryInSec}s), ` +
+      `Too many signup questions or wrong answers from this network. Try again in ${humanDuration(opts.retryInSec)} (${opts.retryInSec}s), ` +
       "or set ZENROWS_API_KEY to an existing key (https://app.zenrows.com/register) and restart this MCP server."
     );
   }

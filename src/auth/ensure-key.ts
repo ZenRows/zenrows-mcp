@@ -423,7 +423,7 @@ export async function signupAgent(
     if (res.status === 429 && parseJson(body)?.error === "challenge_locked") {
       throw new AuthError(
         "SIGNUP_CHALLENGE_LOCKED",
-        "Too many wrong answers to the Zenrows signup question from this network.",
+        "Too many signup questions or wrong answers from this network.",
         parseRetryAfter(res.headers.get("retry-after")) ?? 3600
       );
     }

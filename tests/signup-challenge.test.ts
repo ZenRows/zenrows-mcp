@@ -206,11 +206,11 @@ test("challenge_locked says to wait an hour or set ZENROWS_API_KEY, and backs of
       json(429, { error: "challenge_locked", message: "Too many wrong answers" }, { "Retry-After": "3600" });
     const r = await answer(client, "walrus");
     assert.equal(r.isError, true);
-    assert.match(text(r), /^Too many wrong answers to the Zenrows signup question from this network/);
+    assert.match(text(r), /^Too many signup questions or wrong answers from this network/);
     assert.match(text(r), /Try again in 60 minutes/);
     assert.match(text(r), /set ZENROWS_API_KEY/);
     now += 60_000;
-    assert.match(text(await callUsage(client)), /Too many wrong answers/);
+    assert.match(text(await callUsage(client)), /Too many signup questions or wrong answers/);
     assert.equal(hits["/api/agent/signup"], 2);
     assert.match(text(await answer(client, "norway")), /no signup question waiting/);
   } finally {
