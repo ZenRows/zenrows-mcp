@@ -114,7 +114,8 @@ export function failureNextStep(failure: PreparedDomain["failure"]): string {
       step = "Call prepare_domain again with the same domain and example URLs.";
       break;
     case "discovery_failed":
-      step = "Call prepare_domain again with example_urls (1 to 5 page URLs).";
+      step =
+        "Call prepare_domain again with example_urls (1 to 5 page URLs; at least 3 of the same page type when you can).";
       break;
     case "unpreparable":
       step = "Call prepare_domain again with different example URLs from the same site; the same URLs fail again.";
@@ -360,8 +361,13 @@ export function registerPrepareTools(server: McpServer, apiKey: KeyRef): void {
 
 Use this when extract returns error REQS007 with reason domain_not_prepared. Send the
 domain (the host, e.g. shop.example.com; a leading www. is dropped, and each host is
-prepared separately) and 1 to 5 example URLs: real pages you want extracted, one per page
-kind (for example one product page and one listing page). It returns at once with status
+prepared separately) and example URLs of real pages you want extracted. Pass at least 3
+example URLs of the same page type when you can, up to 5 (for example
+https://www.example.com/products/a, /products/b and /products/c). One URL still works.
+Extract compares the pages of one type against each other, so it can check the fields it
+found and fill in fields one page is missing: more pages of a type give more complete,
+more reliable results for that type. Several page types can share the 5, e.g. 3 product
+pages and 2 search-result pages. It returns at once with status
 "preparing" and never waits; preparation takes a few minutes and costs no credits. Then
 call prepared_domain_status about every 30 seconds until status is "ready", and call
 extract again. Each new domain uses one slot of the account's monthly allowance
@@ -380,7 +386,9 @@ prepared and preparing again does not change that answer.`,
           .array(z.string().url())
           .min(1)
           .max(MAX_EXAMPLE_URLS)
-          .describe("1 to 5 full URLs of real pages on this domain that you want to extract, one per page kind"),
+          .describe(
+            "1 to 5 full URLs of real pages on this domain that you want to extract. Pass at least 3 example URLs of the same page type when you can, up to 5; one URL still works"
+          ),
         idempotency_key: z
           .string()
           .nullish()

@@ -59,3 +59,21 @@ for (const hosted of [false, true]) {
     assert.deepEqual(short, []);
   });
 }
+
+// Extract maps a page type better from several pages of that type, so agents are asked for
+// more than one, without the schema refusing a single URL.
+test("prepare_domain asks for at least 3 example URLs of the same page type and still accepts one", async () => {
+  const prepare = (await listTools(false)).find((t) => t.name === "prepare_domain");
+  assert.ok(prepare, "prepare_domain is not advertised");
+  const guidance = /at\s+least\s+3\s+example\s+URLs\s+of\s+the\s+same\s+page\s+type\s+when\s+you\s+can,\s+up\s+to\s+5/;
+  assert.match(prepare.description ?? "", guidance);
+  assert.doesNotMatch(prepare.description ?? "", /one per page kind/);
+  const exampleUrls = (prepare.inputSchema?.properties ?? {}).example_urls as {
+    description?: string;
+    minItems?: number;
+    maxItems?: number;
+  };
+  assert.match(exampleUrls.description ?? "", guidance);
+  assert.equal(exampleUrls.minItems, 1);
+  assert.equal(exampleUrls.maxItems, 5);
+});
