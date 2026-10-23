@@ -7,8 +7,20 @@
  * into an actionable tool error and is retried on a later call, never before the server's
  * Retry-After.
  */
-import { AuthError, autoSignupEnabled, ensureApiKey, getZenrowsDir, isCI, resolveApiKey } from "./ensure-key.js";
-import type { AgentAccount } from "./ensure-key.js";
+import {
+  AuthError,
+  autoSignupEnabled,
+  ensureApiKey,
+  getZenrowsDir,
+  isCI,
+  resolveApiKey,
+  signupAgent,
+  storeSignup,
+} from "./ensure-key.js";
+import type { AgentAccount, SignupChallenge } from "./ensure-key.js";
+
+/** Name of the tool the agent answers a signup question with. */
+export const SIGNUP_ANSWER_TOOL = "account_signup_answer";
 
 /** Wait after a failure that came with no Retry-After (network error, 5xx). */
 const DEFAULT_BACKOFF_SEC = 60;
@@ -30,6 +42,8 @@ export class LazyApiKey {
   private inflight?: Promise<string>;
   private lastError?: AuthError;
   private retryAt = 0;
+  /** The signup question waiting for the agent's answer. No backoff applies while it is pending. */
+  private pending?: SignupChallenge;
 
   constructor(private readonly opts: LazyKeyOptions = {}) {}
 
@@ -49,6 +63,10 @@ export class LazyApiKey {
       throw new AuthError("AUTH_MISSING", missingKeyMessage());
     }
     if (this.inflight) return this.inflight;
+    if (this.pending && this.now() < this.pending.expiresAt) {
+      throw new AuthError("SIGNUP_CHALLENGE", challengeMessage(this.pending, this.now()));
+    }
+    this.pending = undefined;
     if (this.lastError && this.now() < this.retryAt) {
       throw new AuthError(this.lastError.code, this.describe(this.lastError), this.secondsLeft());
     }
@@ -58,6 +76,7 @@ export class LazyApiKey {
       userAgent: this.opts.userAgent,
       clientName,
       onProvision: this.opts.onProvision,
+      now: () => this.now(),
     })
       .then((r) => {
         this.lastError = undefined;
@@ -69,6 +88,11 @@ export class LazyApiKey {
           err instanceof AuthError
             ? err
             : new AuthError("SIGNUP_FAILED", err instanceof Error ? err.message : String(err));
+        if (authErr.challenge) {
+          // The agent can answer right away: keep the question, apply no backoff.
+          this.pending = authErr.challenge;
+          throw new AuthError(authErr.code, challengeMessage(authErr.challenge, this.now()));
+        }
         this.lastError = authErr;
         this.retryAt = this.now() + backoffSec(authErr) * 1000;
         throw new AuthError(authErr.code, this.describe(authErr), this.secondsLeft());
@@ -79,6 +103,87 @@ export class LazyApiKey {
     return this.inflight;
   }
 
+  /**
+   * Send the agent's answer to the pending signup question. Returns the text for the
+   * answer tool; isError when no account was created.
+   */
+  async answer(answer: string, clientName?: string): Promise<{ text: string; isError: boolean }> {
+    if (this.current || resolveApiKey().key) {
+      return {
+        text: "A Zenrows API key is already set up. No answer is needed; retry your tool call.",
+        isError: false,
+      };
+    }
+    if (this.inflight) {
+      return { text: "A signup request is already running. Wait a moment, then retry your tool call.", isError: true };
+    }
+    const pending = this.pending;
+    if (!pending || this.now() >= pending.expiresAt) {
+      this.pending = undefined;
+      return {
+        text:
+          "There is no signup question waiting for an answer" +
+          (pending ? " (the last one expired)" : "") +
+          ". Call any Zenrows tool: it either works or reports a new question.",
+        isError: true,
+      };
+    }
+    const value = answer.trim();
+    if (!value) return { text: `Empty answer. ${challengeMessage(pending, this.now())}`, isError: true };
+
+    const run = this.submit(pending, value, clientName);
+    // Tool calls made while the answer is in flight wait for it instead of signing up again.
+    this.inflight = run
+      .then((r) => {
+        if (this.current) return this.current;
+        throw new AuthError("SIGNUP_FAILED", r.text);
+      })
+      .finally(() => {
+        this.inflight = undefined;
+      });
+    this.inflight.catch(() => undefined);
+    return run;
+  }
+
+  private async submit(
+    pending: SignupChallenge,
+    answer: string,
+    clientName?: string
+  ): Promise<{ text: string; isError: boolean }> {
+    try {
+      const res = await signupAgent({
+        url: pending.url,
+        answer: { challengeId: pending.id, answer },
+        fetchImpl: this.opts.fetchImpl,
+        userAgent: this.opts.userAgent,
+        clientName,
+        now: () => this.now(),
+      });
+      const acct = storeSignup(res, this.opts.onProvision);
+      this.pending = undefined;
+      this.lastError = undefined;
+      this.retryAt = 0;
+      this.current = res.apiKey;
+      const claim = acct.claimUrl
+        ? ` Give the user this link to claim the account and keep its usage: ${acct.claimUrl}`
+        : " The user can claim the account later to keep its usage; the zenrows://account resource has the details.";
+      return {
+        text: `Correct. Zenrows created a Free account and stored its API key. Retry your original tool call now.${claim}`,
+        isError: false,
+      };
+    } catch (err) {
+      const authErr =
+        err instanceof AuthError
+          ? err
+          : new AuthError("SIGNUP_FAILED", err instanceof Error ? err.message : String(err));
+      this.pending = authErr.challenge;
+      if (authErr.challenge) return { text: challengeMessage(authErr.challenge, this.now()), isError: true };
+      this.lastError = authErr;
+      this.retryAt = this.now() + backoffSec(authErr) * 1000;
+      return { text: this.describe(authErr), isError: true };
+    }
+  }
+
   private secondsLeft(): number {
     return Math.max(0, Math.ceil((this.retryAt - this.now()) / 1000));
   }
@@ -86,6 +191,21 @@ export class LazyApiKey {
   private describe(err: AuthError): string {
     return signupErrorMessage(err, { retryInSec: this.secondsLeft(), ci: isCI(this.opts.env ?? process.env) });
   }
+}
+
+/** The tool error for a pending signup question: what it is, the question, and how to answer. */
+export function challengeMessage(c: SignupChallenge, now: number): string {
+  const lead = c.afterWrongAnswer
+    ? "That answer was wrong or the question expired. Here is a new one."
+    : "Zenrows needs one quick answer before it creates a free account for this server.";
+  const min = Math.max(1, Math.round((c.expiresAt - now) / 60000));
+  return (
+    `${lead}\n` +
+    `Question: ${c.prompt}\n` +
+    `Answer it yourself, then call ${SIGNUP_ANSWER_TOOL} with {"answer": "<your answer>"}. ` +
+    `It expires in about ${min} minute${min === 1 ? "" : "s"}. ` +
+    "After that, retry this tool call. To skip this, set ZENROWS_API_KEY to an existing key and restart this MCP server."
+  );
 }
 
 function backoffSec(err: AuthError): number {
@@ -117,6 +237,12 @@ export function signupErrorMessage(err: AuthError, opts: { retryInSec: number; c
     lines.push(
       "No Zenrows API key in this CI job. Each run starts with an empty home, so each run would create a new account and the per-network signup cap stops it. " +
         "Set ZENROWS_API_KEY as a CI secret, or persist ZENROWS_HOME (default ~/.zenrows) between runs so the first account is reused."
+    );
+  }
+  if (err.code === "SIGNUP_CHALLENGE_LOCKED") {
+    return (
+      `Too many signup questions or wrong answers from this network. Try again in ${humanDuration(opts.retryInSec)} (${opts.retryInSec}s), ` +
+      "or set ZENROWS_API_KEY to an existing key (https://app.zenrows.com/register) and restart this MCP server."
     );
   }
   const reason =

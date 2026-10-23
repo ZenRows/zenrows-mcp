@@ -371,7 +371,7 @@ app.all("/mcp", async (c) => {
       {
         error:
           "Missing API key. Use Authorization: Bearer <key> header or ?apikey=<key> query param. " +
-          `No key yet? A headless agent can POST ${AGENT_SIGNUP_URL} (anonymous, returns apiKey; per-network limits apply) ` +
+          `No key yet? A headless agent can POST ${AGENT_SIGNUP_URL} (anonymous; returns apiKey, or first a 428 question: POST challenge_id and answer back to get it; per-network limits apply) ` +
           "and retry with Authorization: Bearer <key>. Clients that support OAuth can sign in via resource_metadata in WWW-Authenticate.",
         agent_signup: AGENT_SIGNUP_URL,
       },

@@ -38,16 +38,61 @@ export interface SignupResponse {
   claimUrl: string;
 }
 
+/**
+ * A question the signup endpoint asks before it creates an account (HTTP 428). The agent
+ * answers it; this server never tries to.
+ */
+export interface SignupChallenge {
+  id: string;
+  prompt: string;
+  /** Epoch ms after which the server no longer accepts an answer. */
+  expiresAt: number;
+  /** The signup URL that asked it: the answer must go back to the same one. */
+  url: string;
+  /** True when this question replaces one that was answered wrong or expired. */
+  afterWrongAnswer: boolean;
+}
+
 export class AuthError extends Error {
   code: string;
   /** Seconds the server asked us to wait before signing up again (429 Retry-After). */
   retryAfterSec?: number;
-  constructor(code: string, message: string, retryAfterSec?: number) {
+  /** Set on SIGNUP_CHALLENGE: the question to answer before signup goes through. */
+  challenge?: SignupChallenge;
+  constructor(code: string, message: string, retryAfterSec?: number, challenge?: SignupChallenge) {
     super(message);
     this.name = "AuthError";
     this.code = code;
     this.retryAfterSec = retryAfterSec;
+    this.challenge = challenge;
   }
+}
+
+/** Default question lifetime when a 428 does not say. */
+const DEFAULT_CHALLENGE_TTL_SEC = 600;
+
+function parseJson(body: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(body) as unknown;
+    return v && typeof v === "object" ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseChallenge(body: string, url: string, now: number): SignupChallenge | undefined {
+  const json = parseJson(body);
+  const c = json?.challenge as { id?: unknown; prompt?: unknown; expires_in?: unknown } | undefined;
+  if (!c || typeof c.id !== "string" || !c.id || typeof c.prompt !== "string" || !c.prompt.trim()) return undefined;
+  const ttl = typeof c.expires_in === "number" && c.expires_in > 0 ? c.expires_in : DEFAULT_CHALLENGE_TTL_SEC;
+  const message = typeof json?.message === "string" ? json.message : "";
+  return {
+    id: c.id,
+    prompt: c.prompt.trim(),
+    expiresAt: now + ttl * 1000,
+    url,
+    afterWrongAnswer: /^wrong or expired/i.test(message),
+  };
 }
 
 /** Seconds from a Retry-After header (delta-seconds or HTTP date), or undefined. */
@@ -324,7 +369,15 @@ export async function signupCandidates(opts: { fetchImpl?: typeof fetch } = {}):
 }
 
 export async function signupAgent(
-  opts: { url?: string; fetchImpl?: typeof fetch; userAgent?: string; clientName?: string } = {}
+  opts: {
+    url?: string;
+    fetchImpl?: typeof fetch;
+    userAgent?: string;
+    clientName?: string;
+    /** Answer to a pending signup question. Requires url: the question's own signup URL. */
+    answer?: { challengeId: string; answer: string };
+    now?: () => number;
+  } = {}
 ): Promise<SignupResponse> {
   const urls = opts.url ? [opts.url] : await signupCandidates({ fetchImpl: opts.fetchImpl });
   const doFetch = opts.fetchImpl ?? fetch;
@@ -343,13 +396,37 @@ export async function signupAgent(
   for (const url of urls) {
     let res: Response;
     try {
-      res = await doFetch(url, { method: "POST", headers });
+      res = await doFetch(url, {
+        method: "POST",
+        headers,
+        ...(opts.answer
+          ? { body: JSON.stringify({ challenge_id: opts.answer.challengeId, answer: opts.answer.answer }) }
+          : {}),
+      });
     } catch (err) {
       lastMessage = err instanceof Error ? err.message : String(err);
       continue;
     }
     if (res.status === 201) return (await res.json()) as SignupResponse;
     const body = await res.text();
+    if (res.status === 428) {
+      const challenge = parseChallenge(body, url, opts.now?.() ?? Date.now());
+      if (challenge) {
+        throw new AuthError(
+          "SIGNUP_CHALLENGE",
+          "Zenrows asked a question before creating an account.",
+          undefined,
+          challenge
+        );
+      }
+    }
+    if (res.status === 429 && parseJson(body)?.error === "challenge_locked") {
+      throw new AuthError(
+        "SIGNUP_CHALLENGE_LOCKED",
+        "Too many signup questions or wrong answers from this network.",
+        parseRetryAfter(res.headers.get("retry-after")) ?? 3600
+      );
+    }
     if (res.status === 429) {
       throw new AuthError(
         "SIGNUP_RATE_LIMITED",
@@ -375,6 +452,7 @@ export async function ensureApiKey(
     userAgent?: string;
     clientName?: string;
     onProvision?: (a: AgentAccount) => void;
+    now?: () => number;
   } = {}
 ): Promise<{ apiKey: string; provisioned?: AgentAccount }> {
   const existing = resolveApiKey();
@@ -387,7 +465,17 @@ export async function ensureApiKey(
     );
   }
 
-  const res = await signupAgent({ fetchImpl: opts.fetchImpl, userAgent: opts.userAgent, clientName: opts.clientName });
+  const res = await signupAgent({
+    fetchImpl: opts.fetchImpl,
+    userAgent: opts.userAgent,
+    clientName: opts.clientName,
+    now: opts.now,
+  });
+  return { apiKey: res.apiKey, provisioned: storeSignup(res, opts.onProvision) };
+}
+
+/** Persist a fresh signup (key + claim metadata) exactly once, and announce it. */
+export function storeSignup(res: SignupResponse, onProvision?: (a: AgentAccount) => void): AgentAccount {
   saveApiKey(res.apiKey);
   const account: AgentAccount = {
     accountId: res.accountId,
@@ -398,8 +486,8 @@ export async function ensureApiKey(
   };
   account.claimUrlIssuedAt = account.createdAt;
   writeAccount(account);
-  opts.onProvision?.(account);
-  return { apiKey: res.apiKey, provisioned: account };
+  onProvision?.(account);
+  return account;
 }
 
 export const CLAIM_API_URL = "https://app.zenrows.com/api/agent/claim";

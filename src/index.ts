@@ -36,7 +36,10 @@ const key = new LazyApiKey({
   },
 });
 
-const server = createServer(key, undefined, { ensureKey: (clientName) => key.ensure(clientName) });
+const server = createServer(key, undefined, {
+  ensureKey: (clientName) => key.ensure(clientName),
+  answerSignup: (answer, clientName) => key.answer(answer, clientName),
+});
 const transport = new StdioServerTransport();
 await server.connect(transport);
 process.stderr.write(`Zenrows MCP server running on stdio (secrets dir: ${getZenrowsDir()})\n`);
