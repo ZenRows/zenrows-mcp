@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
+import { fetchWithRetry, type RetryOptions } from "../retry.js";
 import { normalizeDomain, PAGE_NOT_RECOGNISED_STEPS, POLL_INTERVAL_SECONDS } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
@@ -201,17 +202,23 @@ async function callZenrows(
   apiKey: string,
   searchParams: URLSearchParams,
   getClientName: () => string | undefined,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
+  retry: RetryOptions
 ): Promise<{ ok: boolean; status: number; body: string }> {
   let response: Response;
   try {
-    response = await fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
-      headers: {
-        "User-Agent": `zenrows/mcp ${pkg.version}`,
-        ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-        "x-mcp-tool": "extract",
-      },
-    });
+    response = await fetchWithRetry(
+      (signal) =>
+        fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
+          headers: {
+            "User-Agent": `zenrows/mcp ${pkg.version}`,
+            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+            "x-mcp-tool": "extract",
+          },
+          signal,
+        }),
+      retry
+    );
   } catch (e) {
     return {
       ok: false,
@@ -227,19 +234,27 @@ export const FALLBACK_AUTOPARSE_NOTE =
   "fallback_autoparse was ignored: it is deprecated and has no effect, because Extract no longer falls back to autoparse. " +
   "On REQS007 with reason domain_not_prepared, prepare the domain with prepare_domain instead.";
 
+export type RunExtractOptions = {
+  getClientName?: () => string | undefined;
+  fetchImpl?: typeof fetch;
+  /** Retry policy for the API call; tests inject sleep and randomness here. */
+  retry?: RetryOptions;
+  /** The MCP request's cancel signal: once it aborts, no retry starts and the running attempt ends. */
+  signal?: AbortSignal;
+};
+
 /**
- * Core extract logic (testable). One request, never retried: when Extract refuses
- * the page (REQS007, or the legacy AUTH010), returns an error naming the next step
- * for its reason. fallback_autoparse is accepted and ignored; when it is true the
- * result says so. The page HTML is returned only when include_html is true.
+ * Core extract logic (testable). One logical request: fetchWithRetry sends it again
+ * only when the API did not serve it (429, 502, 503, 504, or a connection that failed
+ * before sending). When Extract refuses the page (REQS007, or the legacy AUTH010),
+ * returns an error naming the next step for its reason; that refusal is never retried.
+ * fallback_autoparse is accepted and ignored; when it is true the result says so.
+ * The page HTML is returned only when include_html is true.
  */
 export async function runExtract(
   apiKey: string,
   params: ExtractInput,
-  options: {
-    getClientName?: () => string | undefined;
-    fetchImpl?: typeof fetch;
-  } = {}
+  options: RunExtractOptions = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const outcome = await runExtractOnce(apiKey, params, options);
   if (params.fallback_autoparse !== true) return outcome;
@@ -264,13 +279,11 @@ function withNote(errorText: string): string {
 async function runExtractOnce(
   apiKey: string,
   params: ExtractInput,
-  options: {
-    getClientName?: () => string | undefined;
-    fetchImpl?: typeof fetch;
-  } = {}
+  options: RunExtractOptions = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const getClientName = options.getClientName ?? (() => undefined);
   const fetchImpl = options.fetchImpl ?? fetch;
+  const retry: RetryOptions = { label: "extract", signal: options.signal, ...options.retry };
   const mode: ExtractMode = params.mode ?? "auto";
 
   if (mode === "css" && !params.css_extractor) {
@@ -297,7 +310,8 @@ async function runExtractOnce(
     apiKey,
     buildExtractParams(apiKey, params.url, mode, opts),
     getClientName,
-    fetchImpl
+    fetchImpl,
+    retry
   );
 
   if (mode === "auto" && isNoDataExtracted(result.status, result.body)) {
@@ -483,8 +497,8 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           ),
       },
     },
-    async (params) => {
-      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName });
+    async (params, extra) => {
+      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName, signal: extra.signal });
       if (!outcome.ok) return err(outcome.errorText);
       return json({
         ok: true,
