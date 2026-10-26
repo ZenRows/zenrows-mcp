@@ -127,7 +127,7 @@ export function domainNotPreparedError(url: string, status: number, body: string
     message:
       `Extract hasn't prepared ${domain} yet. Call prepare_domain with domain "${domain}" and 1 to 5 example URLs ` +
       "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css. " +
-      "Pass at least 3 example URLs of the same page type as this one when you can, up to 5: add them to example_urls.",
+      "One URL works; we recommend 3 or more of the same page type as this one: add them to example_urls, up to 5.",
     next_tool: { name: "prepare_domain", arguments: { domain, example_urls: [url] } },
     then:
       `Call prepared_domain_status with domain "${domain}" about every ${POLL_INTERVAL_SECONDS} seconds until status ` +
@@ -395,7 +395,7 @@ Modes:
   billing may apply later). Works on any prepared domain, with any API key.
   Error REQS007 says why in "reason":
   - domain_not_prepared: call prepare_domain with the domain and 1 to 5 example
-    URLs (at least 3 of the same page type when you can, up to 5; a few minutes,
+    URLs (one works; we recommend 3 or more of the same page type; a few minutes,
     no credits), poll prepared_domain_status about every
     30 seconds until it says ready, then call extract again.
   - page_not_recognised: the domain is prepared, but this page is not one
