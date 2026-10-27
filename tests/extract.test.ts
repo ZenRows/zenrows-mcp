@@ -84,7 +84,8 @@ test("runExtract ignores fallback_autoparse: true on AUTH010: one call, the prep
 
 const PREPARE_MESSAGE =
   'Extract hasn\'t prepared example.com yet. Call prepare_domain with domain "example.com" and 1 to 5 example URLs ' +
-  "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css.";
+  "(a few minutes, no credits), then retry once prepared_domain_status says ready; meanwhile use mode=css. " +
+  "One URL works; we recommend 3 or more of the same page type as this one: add them to example_urls, up to 5.";
 
 test("runExtract reports REQS007 by default with the prepare step, in one call", async () => {
   const calls: string[] = [];
