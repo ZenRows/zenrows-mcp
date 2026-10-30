@@ -6,12 +6,12 @@
     "url": "https://github.com/ZenRows/zenrows-mcp",
     "source": "github"
   },
-  "version": "2.17.0",
+  "version": "2.18.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@zenrows/mcp",
-      "version": "2.17.0",
+      "version": "2.18.0",
       "transport": {
         "type": "stdio"
       },
