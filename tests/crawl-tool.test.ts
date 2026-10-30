@@ -292,6 +292,52 @@ test("crawl_create sends only the fields the caller set", async () => {
   assert.deepEqual(bodies[4], { url: "https://example.com/", discovery: ["links"] }, "discovery sent as given");
 });
 
+test("crawl_create's webhook takes an https URL, distinct known events and up to 20 metadata keys", () => {
+  const schema = z.object(register().configs.crawl_create.inputSchema);
+  const url = "https://example.com/";
+  const hook = "https://hooks.example.com/z";
+  const ok = (webhook: unknown) => schema.safeParse({ url, webhook }).success;
+  assert.equal(ok({ url: hook }), true);
+  assert.equal(ok({ url: hook, events: ["crawl.completed", "crawl.failed"], metadata: { k: "v", n: 1 } }), true);
+  assert.equal(ok(null), true);
+  assert.equal(ok({}), false, "url is required");
+  assert.equal(ok({ url: "not a url" }), false);
+  assert.equal(ok({ url: hook, events: [] }), false);
+  assert.equal(ok({ url: hook, events: ["crawl.completed", "crawl.completed"] }), false);
+  assert.equal(ok({ url: hook, events: ["crawl.page"] }), false);
+  assert.equal(ok({ url: hook, metadata: { "": 1 } }), false);
+  assert.equal(ok({ url: hook, metadata: { ["k".repeat(65)]: 1 } }), false);
+  assert.equal(
+    ok({ url: hook, metadata: Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`k${i}`, i])) }),
+    false
+  );
+  assert.match(register().configs.crawl_create.description, /signed events/);
+});
+
+test("crawl_create sends webhook with only the fields set, and returns the crawl's webhook", async () => {
+  const { handlers } = register();
+  const bodies: Record<string, unknown>[] = [];
+  const webhook = { url: "https://hooks.example.com/z", events: ["crawl.completed"], metadata: { k: "v" } };
+  const outs = await withFetch(
+    (_u, init) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ ...crawl(), webhook }, 202);
+    },
+    async () => [
+      await handlers.crawl_create({ url: "https://example.com/", webhook }),
+      await handlers.crawl_create({
+        url: "https://example.com/",
+        webhook: { url: webhook.url, events: null, metadata: null },
+      }),
+      await handlers.crawl_create({ url: "https://example.com/", webhook: null }),
+    ]
+  );
+  assert.deepEqual(bodies[0], { url: "https://example.com/", webhook });
+  assert.deepEqual(bodies[1], { url: "https://example.com/", webhook: { url: webhook.url } });
+  assert.deepEqual(bodies[2], { url: "https://example.com/" });
+  assert.deepEqual(JSON.parse(outs[0].content[0].text).crawl.webhook, webhook);
+});
+
 test("crawl_create takes idempotency_key and has no follow or timeout", () => {
   const shape = register().configs.crawl_create.inputSchema;
   assert.equal("follow" in shape, false);

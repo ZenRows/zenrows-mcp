@@ -715,6 +715,27 @@ await liveCheck(
     };
   },
 );
+await liveCheck(
+  "24",
+  "Webhook",
+  "crawl_create with a webhook returns the crawl with that webhook: its url, the events asked for and the metadata",
+  async () => {
+    const webhook = {
+      url: "https://example.com/zenrows-hook",
+      events: ["crawl.completed"],
+      metadata: { k: "v" },
+    };
+    const r = await create({ url: CRAWL_URL, depth: 1, max_items: 1, max_pages: 1, webhook });
+    if (r.isError || !r.data?.crawl_id) return { status: FAIL, actual: H.trim(show(r), 400) };
+    await call(S, "crawl_stop", { crawl_id: r.data.crawl_id });
+    const got = r.data.crawl?.webhook;
+    return {
+      status: passIf(JSON.stringify(got) === JSON.stringify(webhook)),
+      actual: `${r.data.crawl_id}: webhook ${JSON.stringify(got ?? null)}`,
+      evidence: show(r),
+    };
+  },
+);
 await check("15", "Bad key", "AUTH_INVALID", async () => {
   const bad = await startServer("invalid");
   const r = await call(bad.client, "crawl_get", { crawl_id: "c_does_not_exist" });
@@ -807,6 +828,7 @@ H.naming({
       "exclude_patterns",
       "output_format",
       "discovery",
+      "webhook",
       "idempotency_key",
       "cursor",
       "limit",

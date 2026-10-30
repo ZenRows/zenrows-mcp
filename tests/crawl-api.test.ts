@@ -133,6 +133,28 @@ test("422 passes Crawl's detail through in the message", async () => {
   );
 });
 
+test("422 webhook_signing_key_required says where to create the signing key", async () => {
+  const fetchImpl = (async () =>
+    jsonResponse(
+      { code: "webhook_signing_key_required", title: "Unprocessable", detail: "No signing key.", status: 422 },
+      422
+    )) as typeof fetch;
+  await assert.rejects(
+    () =>
+      createCrawl(
+        { url: "https://example.com/", webhook: { url: "https://hooks.example.com/z" } },
+        { apiKey: "k", fetchImpl }
+      ),
+    (e: unknown) => {
+      assert.ok(e instanceof CrawlError);
+      assert.equal(e.code, "CRAWL_INVALID_REQUEST");
+      assert.equal(e.serverCode, "webhook_signing_key_required");
+      assert.match(e.message, /settings\/api-keys/);
+      return true;
+    }
+  );
+});
+
 test("429 too_many_crawls maps to CRAWL_TOO_MANY_CRAWLS and carries Retry-After", async () => {
   const fetchImpl = (async () =>
     jsonResponse({ code: "too_many_crawls", title: "Too many crawls", status: 429 }, 429, {
