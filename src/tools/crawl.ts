@@ -27,6 +27,7 @@ import {
   readResults,
   stopCrawl,
   waitForCrawl,
+  WEBHOOK_EVENTS,
 } from "../crawl-api.js";
 
 const require = createRequire(import.meta.url);
@@ -186,6 +187,8 @@ only links to other sites, or only links the patterns reject) ends completed wit
 and no error. When patterns are set, check them against the URLs the start page links to.
 Set output_format "html" or "markdown" to also store each kept URL's page,
 then read it with crawl_content.
+Set webhook to have signed events posted to your https URL when the crawl starts and when it
+ends; the account needs a webhook signing key, else CRAWL_INVALID_REQUEST (webhook_signing_key_required).
 
 Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
 asynchronously. Call crawl_wait, then crawl_results. Set idempotency_key to make a retry
@@ -234,6 +237,27 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
           .describe(
             "How the crawl finds the URLs it follows on each page it walks. ['links'] follows the links in each page's HTML, and is what a crawl runs with when you omit this."
           ),
+        webhook: z
+          .object({
+            url: z.string().url().describe("Absolute https URL each event is posted to"),
+            events: z
+              .array(z.enum(WEBHOOK_EVENTS))
+              .min(1)
+              .refine((e) => new Set(e).size === e.length, "Name each event once")
+              .nullish()
+              .describe("Events to send, each once. Omit for all four."),
+            metadata: z
+              .record(z.string().min(1).max(64), z.unknown())
+              .refine((m) => Object.keys(m).length <= 20, "At most 20 keys")
+              .nullish()
+              .describe(
+                "Sent back with every event, to match it to your records. Up to 20 keys of 1-64 characters, each value at most 1,024 bytes as JSON."
+              ),
+          })
+          .nullish()
+          .describe(
+            "Where to post the crawl's signed events (crawl.started, then one of crawl.completed, crawl.stopped, crawl.failed). Each is signed with the account's webhook signing key, in the X-Signature header."
+          ),
         idempotency_key: z
           .string()
           .min(1)
@@ -252,6 +276,12 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
       if (params.exclude_patterns?.length) body.exclude_patterns = params.exclude_patterns;
       if (params.output_format) body.output_format = params.output_format;
       if (params.discovery?.length) body.discovery = params.discovery;
+      if (params.webhook) {
+        const { url, events, metadata } = params.webhook;
+        body.webhook = { url };
+        if (events?.length) body.webhook.events = events;
+        if (metadata != null) body.webhook.metadata = metadata;
+      }
 
       try {
         return crawlOut(await createCrawl(body, { ...call, idempotencyKey: params.idempotency_key ?? undefined }));
@@ -265,7 +295,7 @@ CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by de
     "crawl_get",
     {
       annotations: { title: "Get Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found), results and next_cursor.
+      description: `Get a crawl and one page of the URLs it kept: crawl_id, status (running, completed, stopped, failed), the crawl (with coverage: pages_fetched, pages_failed, items_found; webhook when set), results and next_cursor.
 
 completed with stop_reason max_items / max_pages means a limit ended it; stopped with stop_reason user means crawl_stop ended it; stopped with no stop_reason and error.code insufficient_credits or api_key_cap_reached means the account ran out of credits or the API key hit a credit cap (the URLs kept before that stay readable); completed with no results and no error means the crawl's pages held nothing new to follow; when include_patterns / exclude_patterns are set, check them against the URLs the start page links to. failed carries error.code and error.detail: seed_unreachable means the start URL could not be fetched or returned an empty page; no_items_found means the crawl read the start page but found no data it could use, so it had nothing to follow; start from a listing or product page. A failed crawl, and a stopped one with an error, answer ok: false: error.code is CRAWL_INSUFFICIENT_CREDITS or CRAWL_KEY_CAP_REACHED (the codes crawl_create gets on a 402) when credits ended it, failed or stopped, else CRAWL_FAILED; error.server_code is the crawl's error.code. Pass next_cursor as cursor for the next page; while the crawl runs, next_cursor is never null. To read many pages at once, use crawl_results.`,
       inputSchema: {

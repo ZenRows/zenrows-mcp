@@ -44,7 +44,19 @@ export interface Crawl {
    */
   error?: { code: string; detail: string };
   finished_at?: string;
+  /** Absent or null when the crawl was created without a webhook. */
+  webhook?: CrawlWebhook | null;
   [k: string]: unknown;
+}
+
+export const WEBHOOK_EVENTS = ["crawl.started", "crawl.completed", "crawl.stopped", "crawl.failed"] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+/** Where a crawl's signed events go. On a crawl, `events` is the effective list and `metadata` is null when unset. */
+export interface CrawlWebhook {
+  url: string;
+  events: WebhookEvent[];
+  metadata: Record<string, unknown> | null;
 }
 
 export interface CrawlResult {
@@ -88,6 +100,8 @@ export interface CreateCrawlBody {
   output_format?: "html" | "markdown";
   /** How the crawl finds the URLs it follows on each page it walks. */
   discovery?: "links"[];
+  /** Left out: no events are sent. `events` left out means all four. */
+  webhook?: { url: string; events?: WebhookEvent[]; metadata?: Record<string, unknown> };
 }
 
 export interface ProblemJson {
@@ -373,7 +387,12 @@ export function problemToError(
     );
   }
   if (status === 400 || status === 422) {
-    const advice = serverCode === "idempotency_key_reused" ? " Send a new idempotency_key, or none." : "";
+    const advice =
+      serverCode === "idempotency_key_reused"
+        ? " Send a new idempotency_key, or none."
+        : serverCode === "webhook_signing_key_required"
+          ? " Create a webhook signing key at https://app.zenrows.com/settings/api-keys, then retry, or create the crawl without webhook."
+          : "";
     return error(
       "CRAWL_INVALID_REQUEST",
       `Crawl rejected the request${serverCode ? ` (${serverCode})` : ""}: ${detail}${advice}`
