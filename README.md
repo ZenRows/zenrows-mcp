@@ -132,6 +132,8 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 
 **Optional:** `ZENROWS_BATCH_API_BASE` sets the Batch API base URL for the `batch_*` tools (default `https://async.api.zenrows.com/v1`). Set it only to point those tools at another deployment.
 
+**Optional:** `ZENROWS_FETCH_RETRIES` lets `scrape` and `extract` retry, up to that many times, a call the API did not serve. The default `0` sends each call once. They retry a 429, 502, 503 or 504, and a connection that failed before the request was sent (refused, name resolution, unreachable network or host, connect timeout); every other status or error is returned at once, because the API may have received the request. Each wait is the `Retry-After` in whole seconds (clamped to 250 ms - 30 s), or else random between 250 ms and 1 s, 2 s, 4 s, ... up to 30 s. A retry starts only if its wait ends within 50 s of the first request, because MCP clients cancel a tool call at about 60 s; a retry that starts near 50 s can still run past that timeout. Each retry writes one line to stderr. The value is read once at start, and anything other than a whole number of 0 or more stops the server. The hosted server retries only if its operator sets it.
+
 The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
 
 ---

@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
+import { fetchWithRetry } from "../retry.js";
 import { normalizeDomain, PAGE_NOT_RECOGNISED_STEPS, POLL_INTERVAL_SECONDS } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
@@ -202,17 +203,22 @@ async function callZenrows(
   apiKey: string,
   searchParams: URLSearchParams,
   getClientName: () => string | undefined,
-  fetchImpl: typeof fetch
+  fetchImpl: typeof fetch,
+  signal: AbortSignal | undefined
 ): Promise<{ ok: boolean; status: number; body: string }> {
   let response: Response;
   try {
-    response = await fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
-      headers: {
-        "User-Agent": `zenrows/mcp ${pkg.version}`,
-        ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
-        "x-mcp-tool": "extract",
-      },
-    });
+    response = await fetchWithRetry(
+      () =>
+        fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
+          headers: {
+            "User-Agent": `zenrows/mcp ${pkg.version}`,
+            ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
+            "x-mcp-tool": "extract",
+          },
+        }),
+      { label: "extract", signal }
+    );
   } catch (e) {
     return {
       ok: false,
@@ -229,10 +235,12 @@ export const FALLBACK_AUTOPARSE_NOTE =
   "On REQS007 with reason domain_not_prepared, prepare the domain with prepare_domain instead.";
 
 /**
- * Core extract logic (testable). One request, never retried: when Extract refuses
- * the page (REQS007, or the legacy AUTH010), returns an error naming the next step
- * for its reason. fallback_autoparse is accepted and ignored; when it is true the
- * result says so. The page HTML is returned only when include_html is true.
+ * Core extract logic (testable). One request: retries are off by default, and
+ * ZENROWS_FETCH_RETRIES resends only a call the API did not serve (see retry.ts).
+ * When Extract refuses the page (REQS007, or the legacy AUTH010), returns an error
+ * naming the next step for its reason. fallback_autoparse is accepted and ignored;
+ * when it is true the result says so. The page HTML is returned only when
+ * include_html is true.
  */
 export async function runExtract(
   apiKey: string,
@@ -240,6 +248,7 @@ export async function runExtract(
   options: {
     getClientName?: () => string | undefined;
     fetchImpl?: typeof fetch;
+    signal?: AbortSignal;
   } = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const outcome = await runExtractOnce(apiKey, params, options);
@@ -268,6 +277,7 @@ async function runExtractOnce(
   options: {
     getClientName?: () => string | undefined;
     fetchImpl?: typeof fetch;
+    signal?: AbortSignal;
   } = {}
 ): Promise<ExtractSuccess | ExtractFailure> {
   const getClientName = options.getClientName ?? (() => undefined);
@@ -298,7 +308,8 @@ async function runExtractOnce(
     apiKey,
     buildExtractParams(apiKey, params.url, mode, opts),
     getClientName,
-    fetchImpl
+    fetchImpl,
+    options.signal
   );
 
   if (mode === "auto" && isNoDataExtracted(result.status, result.body)) {
@@ -485,8 +496,8 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           ),
       },
     },
-    async (params) => {
-      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName });
+    async (params, extra) => {
+      const outcome = await runExtract(keyOf(apiKey), withoutNulls(params), { getClientName, signal: extra.signal });
       if (!outcome.ok) return err(outcome.errorText);
       return json({
         ok: true,
