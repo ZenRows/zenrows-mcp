@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.19.0](https://github.com/ZenRows/zenrows-mcp/compare/v2.18.0...v2.19.0) (2026-11-06)
+
+
+### Features
+
+* **fetch:** new ZENROWS_FETCH_RETRIES option lets scrape and extract retry calls the API did not serve; off by default ([18e5684](https://github.com/ZenRows/zenrows-mcp/commit/18e56843a86dd56c531a666c20c65cad86a75c6f))
+
 ## [2.18.0](https://github.com/ZenRows/zenrows-mcp/compare/v2.17.0...v2.18.0) (2026-10-30)
 
 
