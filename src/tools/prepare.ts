@@ -357,25 +357,26 @@ export function registerPrepareTools(server: McpServer, apiKey: KeyRef): void {
         idempotentHint: true,
         openWorldHint: true,
       },
-      description: `Prepare a domain so extract (mode=auto) works on it.
+      description: `Prepare a domain for extract's mode "auto". This is what resolves REQS007 with reason domain_not_prepared.
 
-Use this when extract returns error REQS007 with reason domain_not_prepared. Send the
-domain (the host, e.g. shop.example.com; a leading www. is dropped, and each host is
-prepared separately) and 1 to 5 example URLs of real pages you want extracted. One works;
+Takes the domain (the host, e.g. shop.example.com; a leading www. is dropped, and each host is
+prepared separately) and 1 to 5 example URLs of real pages to extract. One works;
 we recommend 3 or more of the same page type, so pass 3 or more when you can, up to 5 (e.g.
 3 product pages: https://www.example.com/products/a, /products/b and /products/c), because
 Extract compares pages of one type to check the fields it found and fill in fields one page
 is missing. Several page types can share the 5 (e.g. 3 product pages + 2 search-result
-pages). It returns at once with status
-"preparing" and never waits; preparation takes a few minutes and costs no credits. Then
-call prepared_domain_status about every 30 seconds until status is "ready", and call
-extract again. Each new domain uses one slot of the account's monthly allowance
+pages).
+
+Returns at once with status "preparing"; preparation runs in the background, takes a few
+minutes and costs no credits. prepared_domain_status reports progress and when the domain
+is "ready".
+
+Side effect: each new domain uses one slot of the account's monthly allowance
 (prepared_domain_status shows it). A domain already being prepared returns its current
 status; a domain already prepared returns "ready" at once with already_prepared: true and
 uses no slot.
 
-Do not call this for REQS007 with reason page_not_recognised: the domain is already
-prepared and preparing again does not change that answer.`,
+It does not change a REQS007 page_not_recognised answer: that domain is already prepared.`,
       inputSchema: {
         domain: z
           .string()
@@ -413,12 +414,12 @@ prepared and preparing again does not change that answer.`,
         destructiveHint: false,
         openWorldHint: true,
       },
-      description: `Check a domain submitted with prepare_domain, and the account's monthly allowance.
+      description: `Report the state of a domain submitted with prepare_domain, and the account's monthly allowance of prepared domains.
 
 Returns status (preparing, ready or failed), state (the current step), roles (one per page
 kind), a failure code and detail when it failed, the allowance (used, limit, remaining) and
-"next": what to do now. Poll about every 30 seconds; preparation takes a few minutes. Call
-extract again once status is "ready". Costs no credits.`,
+"next", a short note on what the current status means. Preparation takes a few minutes;
+extract's mode "auto" serves the domain once status is "ready". Costs no credits.`,
       inputSchema: {
         domain: z.string().min(1).describe("The domain passed to prepare_domain, e.g. example.com"),
       },
