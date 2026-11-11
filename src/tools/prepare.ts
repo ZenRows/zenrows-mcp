@@ -361,7 +361,7 @@ export function registerPrepareTools(server: McpServer, apiKey: KeyRef): void {
 
 Takes the domain (the host, e.g. shop.example.com; a leading www. is dropped, and each host is
 prepared separately) and 1 to 5 example URLs of real pages to extract. One works;
-we recommend 3 or more of the same page type, so pass 3 or more when you can, up to 5 (e.g.
+3 or more of the same page type give the best results, up to 5 (e.g.
 3 product pages: https://www.example.com/products/a, /products/b and /products/c), because
 Extract compares pages of one type to check the fields it found and fill in fields one page
 is missing. Several page types can share the 5 (e.g. 3 product pages + 2 search-result
@@ -387,7 +387,7 @@ It does not change a REQS007 page_not_recognised answer: that domain is already 
           .min(1)
           .max(MAX_EXAMPLE_URLS)
           .describe(
-            "1 to 5 full URLs of real pages on this domain that you want to extract. One works; we recommend 3 or more of the same page type when you can"
+            "1 to 5 full URLs of real pages on this domain that you want to extract. One works; 3 or more of the same page type give the best results"
           ),
         idempotency_key: z
           .string()

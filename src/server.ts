@@ -205,8 +205,8 @@ Examples:
           .describe(
             "Output format. 'markdown' (default) preserves structure and is ideal for LLMs. " +
               "'plaintext' strips all formatting for pure text extraction. " +
-              "'pdf' returns a PDF of the page. " +
               "'html' returns the raw HTML source (omits the response_type param; Zenrows default). " +
+              "'pdf' asks the API for a PDF, which this server decodes as text, so the result is not a usable PDF file. " +
               "Ignored when autoparse, css_extractor, outputs, or screenshot params are set."
           ),
 

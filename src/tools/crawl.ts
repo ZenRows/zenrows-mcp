@@ -174,7 +174,8 @@ export function registerCrawlTools(server: McpServer, apiKey: KeyRef, options: C
 For finding the pages behind one start page, such as a listing, a category or a blog index.
 Runs in the background: returns crawl_id at once, which the other crawl_* tools take.
 With webhook, signed events are posted to an https URL when the crawl starts and when it ends; the account needs a webhook signing key, else CRAWL_INVALID_REQUEST (webhook_signing_key_required).
-Each page the crawl opens is billed in credits, and the price per page depends on the site; max_pages caps how many pages it opens (default 100) and max_items caps how many URLs it keeps (default 100). The start page is never a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match nothing still costs that one scrape. When patterns are set, check them against the URLs the start page links to. A crawl whose pages held nothing new to follow ends completed with no results and no error. A running crawl counts toward the account's limit.`,
+Each page the crawl opens is billed in credits, and the price per page depends on the site; max_pages caps how many pages it opens (default 100) and max_items caps how many URLs it keeps (default 100). The start page is never a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match nothing still costs that one scrape. A crawl whose pages held nothing new to follow ends completed with no results and no error.
+CRAWL_NOT_ENABLED: Crawl is not enabled for this account, and a retry gets the same answer. CRAWL_TOO_MANY_CRAWLS: the account is at its limit of 3 active jobs by default, shared with Batch, and retry_after says how many seconds until a slot frees.`,
       inputSchema: {
         url: z.string().url().describe("Start URL: a public http(s) page, such as a listing or category page"),
         // No lower bound here: the API rejects 0 or less as CRAWL_INVALID_REQUEST, naming the
@@ -302,7 +303,7 @@ completed with stop_reason max_items / max_pages means a limit ended it; stopped
     "crawl_results",
     {
       annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `List the URLs a crawl kept, in the order it kept them, with next_cursor to continue. With output_format, each URL also has content_status and, once stored, content_url. While the crawl runs, the list is partial. A stopped crawl can still add URLs for up to 10 minutes. next_cursor is null once the crawl has ended and every URL was read.`,
+      description: `List the URLs a crawl kept, in the order it kept them, with next_cursor to continue. With output_format, each URL also has content_status and, once stored, content_url, which is what crawl_content takes as content. While the crawl runs, the list is partial. A stopped crawl can still add URLs for up to 10 minutes. next_cursor is null once the crawl has ended and every URL was read.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_results call, to continue from there"),
@@ -430,7 +431,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
     "crawl_wait",
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Wait for a crawl to end (completed, stopped or failed), up to timeout seconds. Returns its status, its counts and its first ${WAIT_URLS} URLs. A crawl that ends completed with no results and no error finished; it is not a failure. If the timeout passes first, the crawl comes back with status running and keeps going.`,
+      description: `Wait for a crawl to end (completed, stopped or failed), up to timeout seconds. Returns its status, its counts and its first ${WAIT_URLS} URLs. A crawl that ends completed with no results and no error finished; it is not a failure. If the timeout passes first, the crawl comes back with status running and keeps going. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z
