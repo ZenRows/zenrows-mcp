@@ -374,7 +374,7 @@ const COSTS = `Cost: the same credits as the regular API, per successful task: 1
 
 const LIMITS = `Limits: up to 100,000 tasks per call; 3 active jobs per account by default, shared with Crawl (BATCH_QUOTA_EXCEEDED past that); a job frees its slot when its run ends.`;
 
-const RESULT_FACTS = `A result_url is presigned and expires after 2 hours: call batch_results again for a fresh one, or read the body with batch_content. Results are kept 14 days by default; after that a successful row reads as status "expired", with no result_url, and batch_content answers BATCH_RESULT_EXPIRED.`;
+const RESULT_FACTS = `A result_url is presigned and expires after 2 hours: a new batch_results call returns a fresh one, and batch_content reads the body. Results are kept 14 days by default; after that a successful row reads as status "expired", with no result_url, and batch_content answers BATCH_RESULT_EXPIRED.`;
 
 export function registerBatchTools(
   server: McpServer,
@@ -430,15 +430,15 @@ export function registerBatchTools(
       annotations: { title: "Create Batch Job", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description: `Submit a Batch job: many URLs scraped asynchronously in the cloud (Zenrows Batch API). Suited to large URL lists; scrape and extract handle single pages. Not the same as browser_batch.
 
-Tasks use automatic mode (mode=auto) by default: Zenrows enables JS rendering and premium proxies only on the pages that need them. Pass just the URLs. Set js_render or premium_proxy (job-level, or per task) only to force a fixed configuration; that turns automatic mode off for those tasks.
+Tasks use automatic mode (mode=auto) by default: Zenrows enables JS rendering and premium proxies only on the pages that need them. A list of URLs alone is enough. Setting js_render or premium_proxy (job-level, or per task) forces a fixed configuration and turns automatic mode off for those tasks.
 
 ${COSTS}
 ${LIMITS}
 
 Creates a closed job with every task in this one call. Each task takes a url plus optional external_id, metadata, method/body (POST tasks) and scrape params. Every call sends an Idempotency-Key, so the bounded retries on network errors and 5xx never create a second job; an error reply carries the key to retry with.
 
-Returns job_id, status and stats at once; the job runs asynchronously. Then: batch_wait until it ends, batch_results to list rows (paged), batch_content to read one task's page. A run that ends failed (out of credits, inactive subscription, key cap) answers ok:false with error.code and server_code; batch_rerun recovers it. Submits of 10,000+ tasks keep writing tasks for a while (ingesting:true).
-Errors: BATCH_INVALID_REQUEST (400, server_code and invalid_tasks say what), BATCH_INSUFFICIENT_CREDITS (402), BATCH_KEY_CAP_REACHED (402, this key's cap), BATCH_QUOTA_EXCEEDED (429, job limit), AUTH_INVALID (401; server_code subscription_inactive means fix Billing), BATCH_ACCESS_DENIED (403, do not retry), BACKEND_UNAVAILABLE.
+Returns job_id, status and stats at once; the job runs asynchronously. The job_id is what batch_status, batch_wait, batch_results and batch_content take: batch_wait reports when the run ends, batch_results lists its rows (paged) and batch_content returns one task's page. A run that ends failed (out of credits, inactive subscription, key cap) answers ok:false with error.code and server_code; batch_rerun recovers it. Submits of 10,000+ tasks keep writing tasks for a while (ingesting:true).
+Errors: BATCH_INVALID_REQUEST (400, server_code and invalid_tasks say what), BATCH_INSUFFICIENT_CREDITS (402), BATCH_KEY_CAP_REACHED (402, this key's cap), BATCH_QUOTA_EXCEEDED (429, job limit), AUTH_INVALID (401; server_code subscription_inactive means the subscription is inactive), BATCH_ACCESS_DENIED (403; a retry gets the same answer), BACKEND_UNAVAILABLE.
 Schedules, webhooks, exports, CSV inputs and open jobs are available through the Batch API and SDKs only.`,
       inputSchema: {
         tasks: z
@@ -612,7 +612,7 @@ A failed run answers ok:false with error.code BATCH_INSUFFICIENT_CREDITS, BATCH_
     "batch_wait",
     {
       annotations: { title: "Wait for Batch Job", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Poll a Batch job until its run ends (completed, stopped or failed) or pauses, and return its status and stats like batch_status. If the wait runs out first, it returns the current state with ok:true, timed_out:true and a note: call batch_wait again. A paused run returns at once with paused:true (it does not move until batch_resume). A failed run answers ok:false with error.code and server_code (insufficient_credits, subscription_inactive or api_key_cap_reached). Transient poll errors are retried. A call that carries a progressToken gets a progress notification after each poll.`,
+      description: `Poll a Batch job until its run ends (completed, stopped or failed) or pauses, and return its status and stats like batch_status. If the wait runs out first, it returns the current state with ok:true and timed_out:true; the job keeps running, and another batch_wait call goes on waiting. A paused run returns at once with paused:true (it does not move until batch_resume). A failed run answers ok:false with error.code and server_code (insufficient_credits, subscription_inactive or api_key_cap_reached). Transient poll errors are retried. A call that carries a progressToken gets a progress notification after each poll.`,
       inputSchema: {
         job_id: jobIdSchema,
         timeout: waitSecondsSchema,
@@ -632,11 +632,11 @@ A failed run answers ok:false with error.code BATCH_INSUFFICIENT_CREDITS, BATCH_
     "batch_results",
     {
       annotations: { title: "Batch Job Results", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `List a Batch run's result rows, a page at a time: up to limit rows (default ${DEFAULT_RESULTS_LIMIT}, max 1000) and next_cursor. Pass next_cursor back as cursor to continue; it is null once every row was read.
+      description: `List a Batch run's result rows, a page at a time: up to limit rows (default ${DEFAULT_RESULTS_LIMIT}, max 1000) and next_cursor. next_cursor, passed back as cursor, continues the list; it is null once every row was read.
 
 Each row has task_id, external_id, url, metadata, status (successful, failed, pending, processing, expired), type, result_url when successful, and error when failed. ${RESULT_FACTS}
 
-Filter with status: all (default), successful, failed, or processing (not finished yet). A sparse filter can return fewer rows than limit with next_cursor still set: keep paging. While the run is still running or writing its tasks, the list is partial.`,
+Filter with status: all (default), successful, failed, or processing (not finished yet). A sparse filter can return fewer rows than limit with next_cursor still set; more rows follow. While the run is still running or writing its tasks, the list is partial.`,
       inputSchema: {
         job_id: jobIdSchema,
         run_id: runIdSchema,
@@ -686,9 +686,9 @@ Filter with status: all (default), successful, failed, or processing (not finish
     "batch_content",
     {
       annotations: { title: "Batch Task Content", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Read one Batch task's stored result, by job_id and task_id (from batch_results). A text result (HTML, Markdown, plain text, JSON) comes back inline, cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. A binary result (a PDF) is not inlined: the reply gives its result_url, presigned for 2 hours. Finding that URL reads the run's results; on a large run one call may run out of time first and answer with lookup_cursor: call batch_content again with it to go on.
+      description: `Read one Batch task's stored result, by job_id and task_id (from batch_results). A text result (HTML, Markdown, plain text, JSON) comes back inline, cut to max_chars (default ${DEFAULT_CONTENT_MAX_CHARS}); a final note says when it was cut. A binary result (a PDF) is not inlined: the reply gives its result_url, presigned for 2 hours. Finding that URL reads the run's results; on a large run one call may run out of time first and answer with lookup_cursor; passing it back continues the lookup.
 
-BATCH_TASK_NOT_READY: the task has not finished; BATCH_TASK_FAILED: it failed (task_error holds its error); BATCH_RESULT_EXPIRED: past the job's retention (14 days by default); rerun to scrape it again.`,
+BATCH_TASK_NOT_READY: the task has not finished; BATCH_TASK_FAILED: it failed (task_error holds its error); BATCH_RESULT_EXPIRED: past the job's retention (14 days by default); batch_rerun scrapes it again.`,
       inputSchema: {
         job_id: jobIdSchema,
         task_id: z.string().min(1).describe("task_id from a batch_results row"),

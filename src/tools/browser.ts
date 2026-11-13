@@ -44,17 +44,18 @@ export function registerBrowserTools(
         destructiveHint: false,
         openWorldHint: true,
       },
-      description: `Open a Zenrows Browser Sessions session and navigate to a URL.
+      description: `Open a Zenrows Browser session (a hosted browser) and navigate to a URL in one step.
 
-This is the entry point for all browser automation. It creates a new session backed by
-Zenrows' hosted browser infrastructure and navigates to the given URL in one step.
+Every browser automation starts here. Returns a session_id that every other browser_* tool takes.
 
-Returns a session_id that every other browser_* tool takes. The session holds one
-concurrency slot until browser_close closes it.
+Side effects: the session holds one concurrency slot and is billed for its open time
+(5 credits per minute) and its traffic (25,000 credits per GB) until browser_close ends it;
+a session closes after 3 minutes without a browser_* call, or 15 minutes after it opened,
+and is billed until it closes.
 
-When to use options:
+Options:
 - proxy_country: geo-restricted content (ISO 3166-1 alpha-2, e.g. "US", "DE")
-- proxy_region: world region for geo-targeted proxy (eu, na, ap, sa, af, me)`,
+- proxy_region: world region for a geo-targeted proxy (eu, na, ap, sa, af, me)`,
       inputSchema: {
         url: z.string().url().describe("The URL to navigate to"),
         proxy_country: z
@@ -113,7 +114,7 @@ When to use options:
     {
       annotations: { title: "Close Browser Session", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
       description:
-        "Close a browser session and free all associated resources, including the concurrency slot it holds.",
+        "Close a browser session: frees its concurrency slot and ends its billed time.",
       inputSchema: { session_id: sessionId },
     },
     async ({ session_id }) => {
