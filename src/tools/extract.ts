@@ -410,7 +410,7 @@ Error REQS007 says in "reason" why mode "auto" returned no fields:
 - domain_not_enabled: mode "auto" is not available on this domain; mode "css" (css_extractor) works there.
 
 Pages are fetched in automatic mode by default (the mode_auto parameter): JavaScript rendering and premium proxies are added only when the site needs them, and only the configuration that succeeded is billed. Setting js_render or premium_proxy, or mode_auto to false, turns automatic mode off and bills every request at that fixed configuration.
-Extract adds no charge of its own: a request costs the underlying fetch, 1 credit basic, 5 with js_render, 10 with premium_proxy, 25 with both. Neither a REQS007 answer nor a page Extract processed and found nothing on ("noDataExtracted") is billed.
+Extract is currently free, and billing for it may apply later: today a request costs only the underlying fetch, 1 credit basic, 5 with js_render, 10 with premium_proxy, 25 with both. Neither a 403 REQS007 nor a 422 no_data_extracted (Extract ran on the page and found nothing on it) is billed, for the fetch or for Extract.
 
 In the result, "empty": true means no field came back with a value. "noDataExtracted": true means Extract processed the page and found nothing to extract.`,
       inputSchema: {
