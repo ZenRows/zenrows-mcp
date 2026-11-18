@@ -12,7 +12,7 @@ The Zenrows MCP (Model Context Protocol) server is the standard way AI systems u
 [![npm version](https://img.shields.io/npm/v/@zenrows/mcp)](https://www.npmjs.com/package/@zenrows/mcp)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/ZenRows/zenrows-mcp/blob/main/LICENSE)
 
-📚 **Full documentation:** [docs.zenrows.com/mcp/overview](https://docs.zenrows.com/mcp/overview)
+📚 **Full documentation:** [docs.zenrows.com/mcp/overview](https://docs.zenrows.com/mcp/overview?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp)
 
 ---
 
@@ -83,7 +83,7 @@ response = client.responses.create(
 print(response.output_text)
 ```
 
-For the full walkthrough with framework-specific examples, see the [Remote MCP server docs](https://docs.zenrows.com/mcp/overview#remote-mcp-server).
+For the full walkthrough with framework-specific examples, see the [Remote MCP server docs](https://docs.zenrows.com/mcp/overview?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp#remote-mcp-server).
 
 ### Local MCP server
 
@@ -134,7 +134,7 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 
 **Optional:** `ZENROWS_FETCH_RETRIES` lets `scrape` and `extract` retry, up to that many times, a call the API did not serve. The default `0` sends each call once. They retry a 429, 502, 503 or 504, and a connection that failed before the request was sent (refused, name resolution, unreachable network or host, connect timeout); every other status or error is returned at once, because the API may have received the request. Each wait is the `Retry-After` in whole seconds (clamped to 250 ms - 30 s), or else random between 250 ms and 1 s, 2 s, 4 s, ... up to 30 s. A retry starts only if its wait ends within 50 s of the first request, because MCP clients cancel a tool call at about 60 s; a retry that starts near 50 s can still run past that timeout. Each retry writes one line to stderr. The value is read once at start, and anything other than a whole number of 0 or more stops the server. The hosted server retries only if its operator sets it.
 
-The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview#per-client-setup-guides) for the file path for your client.
+The exact location of this config varies by client. See the [per-client setup guides](https://docs.zenrows.com/mcp/overview?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp#per-client-setup-guides) for the file path for your client.
 
 ---
 
@@ -188,11 +188,11 @@ Errors carry `code`, `message`, `detail`, `server_code` (the Batch API's own cod
 
 Reads retry on 429, 500, 502, 503, 504 and network errors, up to 3 times, honoring `Retry-After` up to 30 seconds. `batch_create` and `batch_rerun` retry on 500, 502, 503, 504, network errors and a 429 with `Retry-After`, always with the same `Idempotency-Key`; never on the job-limit 429. On `BATCH_IDEMPOTENCY_CONFLICT` for the same request, keep the key, check `batch_list` and retry later: a new key can create a second, billed job.
 
-Schedules, webhooks, results exports, CSV inputs, open jobs (adding tasks over time), runs and task history are available through the [Batch API](https://docs.zenrows.com/batch/introduction) and the Zenrows SDKs only.
+Schedules, webhooks, results exports, CSV inputs, open jobs (adding tasks over time), runs and task history are available through the [Batch API](https://docs.zenrows.com/batch/introduction?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp) and the Zenrows SDKs only.
 
 The AI selects the right tool from your prompt. You don't call tools directly in code.
 
-See the [full tool reference](https://docs.zenrows.com/mcp/overview#tools) for every tool, parameter, and return value.
+See the [full tool reference](https://docs.zenrows.com/mcp/overview?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp#tools) for every tool, parameter, and return value.
 
 ---
 
@@ -266,11 +266,11 @@ Pull requests and issues are welcome.
 
 ## Resources
 
-- [Full Zenrows MCP documentation](https://docs.zenrows.com/mcp/overview)
-- [Zenrows Fetch](https://docs.zenrows.com/fetch/api-reference)
-- [Zenrows Browser Sessions](https://docs.zenrows.com/browser-sessions/introduction)
+- [Full Zenrows MCP documentation](https://docs.zenrows.com/mcp/overview?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp)
+- [Zenrows Fetch](https://docs.zenrows.com/fetch/api-reference?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp)
+- [Zenrows Browser Sessions](https://docs.zenrows.com/browser-sessions/introduction?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp)
 - [npm package](https://www.npmjs.com/package/@zenrows/mcp)
-- [Get your API key](https://app.zenrows.com/register)
+- [Get your API key](https://app.zenrows.com/register?utm_source=github&utm_medium=readme&utm_campaign=zenrows-mcp)
 
 ---
 
