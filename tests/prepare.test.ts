@@ -146,6 +146,44 @@ test("out_of_allowance keeps used / limit / month from the body", () => {
   assert.equal(e.month, "2026-10");
 });
 
+test("domain_rejection_limit is its own error, not out_of_allowance, and keeps domain / rejected / limit / month", async () => {
+  const { calls, fetchImpl } = stub({
+    [`POST ${BASE}`]: () =>
+      problem(429, "domain_rejection_limit", { domain: "example.com", rejected: 3, limit: 3, month: "2026-11" }),
+  });
+  const out = await runPrepareDomain(
+    "k",
+    { domain: "example.com", example_urls: ["https://example.com/p"] },
+    { fetchImpl }
+  );
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.error.code, "domain_rejection_limit");
+  assert.equal(out.error.status, 429);
+  assert.equal(out.error.domain, "example.com");
+  assert.equal(out.error.rejected, 3);
+  assert.equal(out.error.limit, 3);
+  assert.equal(out.error.month, "2026-11");
+  assert.match(
+    out.error.message,
+    /^example\.com was rejected 3 times this month \(limit 3\); new preparation attempts for it are refused until 2026-11 ends \(UTC\)\./
+  );
+  assert.match(out.error.message, /try another domain, or use extract with mode=css/);
+  assert.doesNotMatch(out.error.message, /allowance/);
+  assert.equal(calls.length, 1);
+});
+
+test("domain_rejection_limit without fields still names the domain and next month", () => {
+  const e = prepareError(429, JSON.stringify({ code: "domain_rejection_limit" }), "x.com");
+  assert.equal(e.code, "domain_rejection_limit");
+  assert.equal(e.domain, "x.com");
+  assert.match(e.message, /^x\.com was rejected this month; .* until the start of next month \(UTC\)\./);
+});
+
+test("a 429 with no code is still out_of_allowance", () => {
+  assert.equal(prepareError(429, "", "x.com").code, "out_of_allowance");
+});
+
 test("invalid_argument keeps the reason", () => {
   const e = prepareError(400, JSON.stringify({ code: "invalid_argument", reason: "invalid_domain" }), "x");
   assert.equal(e.reason, "invalid_domain");

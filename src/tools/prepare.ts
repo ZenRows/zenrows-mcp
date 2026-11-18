@@ -207,6 +207,24 @@ export function prepareError(status: number, body: string, domain: string): Prep
       detail,
     };
   }
+  if (code === "domain_rejection_limit") {
+    const name = typeof p.domain === "string" && p.domain ? p.domain : domain;
+    const times =
+      p.rejected !== undefined && p.limit !== undefined
+        ? ` ${String(p.rejected)} times this month (limit ${String(p.limit)})`
+        : " this month";
+    const until = typeof p.month === "string" && p.month ? `${p.month} ends (UTC)` : "the start of next month (UTC)";
+    return {
+      code: "domain_rejection_limit",
+      message: `${name} was rejected${times}; new preparation attempts for it are refused until ${until}. Do not retry this domain this month; try another domain, or use extract with mode=css.`,
+      status,
+      detail,
+      domain: name,
+      ...(p.rejected !== undefined ? { rejected: p.rejected } : {}),
+      ...(p.limit !== undefined ? { limit: p.limit } : {}),
+      ...(p.month !== undefined ? { month: p.month } : {}),
+    };
+  }
   if (code === "out_of_allowance" || status === 429) {
     return {
       code: "out_of_allowance",
@@ -370,7 +388,8 @@ pages). It returns at once with status
 "preparing" and never waits; preparation takes a few minutes and costs no credits. Then
 call prepared_domain_status about every 30 seconds until status is "ready", and call
 extract again. Each new domain uses one slot of the account's monthly allowance
-(prepared_domain_status shows it). A domain already being prepared returns its current
+(prepared_domain_status shows it); a domain rejected too many times this month answers
+domain_rejection_limit until next month. A domain already being prepared returns its current
 status; a domain already prepared returns "ready" at once with already_prepared: true and
 uses no slot.
 
