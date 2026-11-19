@@ -62,12 +62,12 @@ for (const hosted of [false, true]) {
 
 // Extract maps a page type better from several pages of that type, so agents are asked for
 // more than one, without the schema refusing a single URL.
-test("prepare_domain recommends 3 or more example URLs of the same page type and still accepts one", async () => {
+test("prepare_domain says 3 or more example URLs of the same page type give the best results, and still accepts one", async () => {
   const prepare = (await listTools(false)).find((t) => t.name === "prepare_domain");
   assert.ok(prepare, "prepare_domain is not advertised");
-  const guidance = /One\s+works;\s+we\s+recommend\s+3\s+or\s+more\s+of\s+the\s+same\s+page\s+type/;
+  const guidance = /One\s+works;\s+3\s+or\s+more\s+of\s+the\s+same\s+page\s+type\s+give\s+the\s+best\s+results/;
   assert.match(prepare.description ?? "", guidance);
-  assert.match(prepare.description ?? "", /pass\s+3\s+or\s+more\s+when\s+you\s+can,\s+up\s+to\s+5/);
+  assert.match(prepare.description ?? "", /give\s+the\s+best\s+results,\s+up\s+to\s+5/);
   assert.match(prepare.description ?? "", /3\s+product\s+pages\s+\+\s+2\s+search-result\s+pages/);
   assert.doesNotMatch(prepare.description ?? "", /one\s+per\s+page\s+kind|at\s+least\s+3/);
   const exampleUrls = (prepare.inputSchema?.properties ?? {}).example_urls as {

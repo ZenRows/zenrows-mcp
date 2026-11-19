@@ -112,7 +112,6 @@ test("crawl's descriptions say 0 results with no error is a completed crawl, and
   const c = configs.crawl_create;
   const shape = c.inputSchema as Record<string, z.ZodTypeAny>;
   assert.match(c.description, /ends completed with no results\s+and no error/);
-  assert.match(c.description, /check them against the URLs the start page links to/);
   assert.match(configs.crawl_get.description, /completed with no results and no error/);
   assert.match(configs.crawl_get.description, /check them against the URLs the start page links to/);
   assert.match(configs.crawl_wait.description, /completed with no results and no error finished; it is not a failure/);

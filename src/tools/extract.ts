@@ -397,37 +397,22 @@ export function registerExtractTool(server: McpServer, apiKey: KeyRef, getClient
         destructiveHint: false,
         openWorldHint: true,
       },
-      description: `Extract structured data from a webpage via Zenrows.
+      description: `Extract structured JSON fields from one web page with Zenrows (Extract): products, articles, listings and similar page types, returned in "data" instead of the page body. With mode "auto", include_html adds the page HTML.
 
-Returns JSON fields (products, articles, listings) in "data" rather than a full
-page body. Set include_html to also get the page HTML.
-Modes:
-- auto (default): extract=auto, site-tailored Extract (currently free,
-  billing may apply later). Works on any prepared domain, with any API key.
-  Error REQS007 says why in "reason":
-  - domain_not_prepared: call prepare_domain with the domain and 1 to 5 example
-    URLs (one works; we recommend 3 or more of the same page type; a few minutes,
-    no credits), poll prepared_domain_status about every
-    30 seconds until it says ready, then call extract again.
-  - page_not_recognised: the domain is prepared, but this page is not one
-    Extract extracts (a page with nothing to extract, such as a home page). Try a product,
-    article or listing page instead; if this page should work, retry it once in
-    a few minutes; otherwise use mode=css. Do not prepare the domain again.
-  - domain_not_enabled: preparing does not help; use mode=css.
-- autoparse: deprecated general-purpose structured JSON on any domain; use only
-  when asked for
-- css: css_extractor with an explicit selector map
+Extraction options (the mode parameter):
+- mode "auto" (default): fields tailored to the site. Works on any domain that has been prepared, with any API key.
+- mode "css" (css_extractor, a map of field name to CSS selector): the fields you name. Works on any domain.
+- mode "autoparse": deprecated general-purpose JSON on any domain.
 
-Requests use automatic mode (mode=auto) by default: Zenrows enables JS rendering and
-premium proxies only when the site needs them, and charges only for the
-configuration that succeeds. Pass just the URL.
-Set js_render or premium_proxy only to force a fixed configuration; that turns
-automatic mode off and bills every request at that configuration's cost.
+Error REQS007 says in "reason" why mode "auto" returned no fields:
+- domain_not_prepared: the domain has not been prepared yet. prepare_domain prepares it (a few minutes, no credits).
+- page_not_recognised: the domain is prepared, but this page is not a type Extract extracts (for example, a home page). Preparing the domain again does not change this answer.
+- domain_not_enabled: mode "auto" is not available on this domain; mode "css" (css_extractor) works there.
 
-Check "empty" in the result: true means no field came back with a value.
-"noDataExtracted": true means Extract processed the page and found nothing to
-extract (not charged); retrying the same request returns the same answer.
-Full-page markdown, HTML and screenshots come from scrape.`,
+Pages are fetched in automatic mode by default (the mode_auto parameter): JavaScript rendering and premium proxies are added only when the site needs them, and only the configuration that succeeded is billed. Setting js_render or premium_proxy, or mode_auto to false, turns automatic mode off and bills every request at that fixed configuration.
+Extract is currently free, and billing for it may apply later: today a request costs only the underlying fetch, 1 credit basic, 5 with js_render, 10 with premium_proxy, 25 with both. Neither a 403 REQS007 nor a 422 no_data_extracted (Extract ran on the page and found nothing on it) is billed, for the fetch or for Extract.
+
+In the result, "empty": true means no field came back with a value. "noDataExtracted": true means Extract processed the page and found nothing to extract.`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to extract from"),
         mode: z
@@ -485,7 +470,7 @@ Full-page markdown, HTML and screenshots come from scrape.`,
           .boolean()
           .nullish()
           .describe(
-            "Deprecated, has no effect: Extract no longer falls back to autoparse. Prepare the domain with prepare_domain instead."
+            'Deprecated, has no effect: Extract no longer falls back to autoparse. prepare_domain prepares a domain for mode "auto".'
           ),
         include_html: z
           .boolean()

@@ -146,9 +146,6 @@ function progressMessage(crawl: Crawl): string {
   return `${crawl.status}: ${c?.pages_fetched ?? 0} pages fetched, ${c?.items_found ?? 0} URLs kept`;
 }
 
-const WHEN_TO_USE = `Use crawl when you have one start page (a listing, category, blog index) and need
-the URLs behind it, optionally with each page's HTML. For a single page, use scrape.`;
-
 const crawlIdSchema = z.string().describe("Crawl id returned by crawl_create (c_…)");
 const limitSchema = z.number().int().min(1).max(10_000).nullish();
 
@@ -173,28 +170,12 @@ export function registerCrawlTools(server: McpServer, apiKey: KeyRef, options: C
     "crawl_create",
     {
       annotations: { title: "Create Crawl", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-      description: `Start a crawl from one URL (Zenrows Crawl API). Crawl follows the links in each page's HTML up to depth hops (no depth limit when depth is omitted), keeps the URLs that match include_patterns / exclude_patterns, and stays on the start URL's registrable domain (subdomains count).
-
-${WHEN_TO_USE}
-
-Each page fetched is billed as one scrape on this account; max_pages bounds the cost
-(default 100), max_items bounds how many URLs are kept (default 100). Without depth, the
-crawl keeps following links until max_pages or max_items stops it or nothing is left to
-open, so set max_pages to what you are willing to spend. The start page itself is never
-a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match
-nothing still costs that one scrape. A crawl whose pages held nothing new to follow (no link,
-only links to other sites, or only links the patterns reject) ends completed with no results
-and no error. When patterns are set, check them against the URLs the start page links to.
-Set output_format "html" or "markdown" to also store each kept URL's page,
-then read it with crawl_content.
-Set webhook to have signed events posted to your https URL when the crawl starts and when it
-ends; the account needs a webhook signing key, else CRAWL_INVALID_REQUEST (webhook_signing_key_required).
-
-Returns crawl_id, status and the crawl (with coverage) at once; the crawl runs
-asynchronously. Call crawl_wait, then crawl_results. Set idempotency_key to make a retry
-safe: the same key returns the crawl the first request created instead of starting another.
-CRAWL_NOT_ENABLED: Crawl is not enabled for this account; do not retry.
-CRAWL_TOO_MANY_CRAWLS: the account has reached its limit of active jobs (3 by default), shared with its Batch jobs; retry after retry_after seconds.`,
+      description: `Start a crawl: from one start URL, follow the links on each page and keep the URLs that match include_patterns and don't match exclude_patterns, on the same site, subdomains included (from shop.example.com, also www.example.com and blog.example.com). Links are followed up to depth hops, with no depth limit when depth is omitted. With output_format, it also stores each kept page as HTML or Markdown.
+For finding the pages behind one start page, such as a listing, a category or a blog index.
+Runs in the background: returns crawl_id at once, which the other crawl_* tools take.
+With webhook, signed events are posted to an https URL when the crawl starts and when it ends; the account needs a webhook signing key, else CRAWL_INVALID_REQUEST (webhook_signing_key_required).
+Each page the crawl opens is billed in credits, and the price per page depends on the site; max_pages caps how many pages it opens (default 100) and max_items caps how many URLs it keeps (default 100). The start page is never a result, but its fetch is billed: a crawl whose include_patterns / exclude_patterns match nothing still costs that one scrape. A crawl whose pages held nothing new to follow ends completed with no results and no error.
+CRAWL_NOT_ENABLED: Crawl is not enabled for this account, and a retry gets the same answer. CRAWL_TOO_MANY_CRAWLS: the account is at its limit of 3 active jobs by default, shared with Batch, and retry_after says how many seconds until a slot frees.`,
       inputSchema: {
         url: z.string().url().describe("Start URL: a public http(s) page, such as a listing or category page"),
         // No lower bound here: the API rejects 0 or less as CRAWL_INVALID_REQUEST, naming the
@@ -322,11 +303,7 @@ completed with stop_reason max_items / max_pages means a limit ended it; stopped
     "crawl_results",
     {
       annotations: { title: "Crawl Results", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `List the URLs a crawl kept, in the order it kept them, following the API's pages up to limit.
-
-Each result has url and, when the crawl has output_format, content_status (pending, fetched, failed) and, once fetched, content_url: pass it to crawl_content as content.
-
-While the crawl runs the list is partial (partial=true): call again later with the returned next_cursor to get only the URLs kept since. A stopped crawl can still add URLs from pages fetched before the stop for up to 10 minutes, so next_cursor stays set during that window: call again later. next_cursor is null once the crawl ended and every URL was read.`,
+      description: `List the URLs a crawl kept, in the order it kept them, with next_cursor to continue. With output_format, each URL also has content_status and, once stored, content_url, which is what crawl_content takes as content. While the crawl runs, the list is partial. A stopped crawl can still add URLs for up to 10 minutes. next_cursor is null once the crawl has ended and every URL was read.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         cursor: z.string().nullish().describe("next_cursor from a previous crawl_results call, to continue from there"),
@@ -454,7 +431,7 @@ Idempotent: a crawl that already ended answers with its final status. A 429, 502
     "crawl_wait",
     {
       annotations: { title: "Wait for Crawl", readOnlyHint: true, destructiveHint: false, openWorldHint: true },
-      description: `Poll a crawl until it ends (completed, stopped, or failed) and return its status, its counts and the first ${WAIT_URLS} URLs (first_urls). For every result, call crawl_download (one file) or crawl_results (pages). A crawl that ends completed with no results and no error finished; it is not a failure (see crawl_get). If the wait runs out first, it returns the crawl with status running and a note: call crawl_wait again. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
+      description: `Wait for a crawl to end (completed, stopped or failed), up to timeout seconds. Returns its status, its counts and its first ${WAIT_URLS} URLs. A crawl that ends completed with no results and no error finished; it is not a failure. If the timeout passes first, the crawl comes back with status running and keeps going. A call that carries a progressToken gets a progress notification after each poll, with the status and counts.`,
       inputSchema: {
         crawl_id: crawlIdSchema,
         timeout: z

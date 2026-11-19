@@ -23,15 +23,17 @@ const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
 const DEFAULT_RESPONSE_TYPE =
   (process.env.ZENROWS_RESPONSE_TYPE as "markdown" | "plaintext" | "html" | undefined) ?? "markdown";
 
-// Sent in the initialize response; clients put it in the model's context, so it says
-// which tool to reach for first, not what every tool does.
+// Sent in the initialize response; clients put it in the model's context, so it maps the
+// groups of tools as facts, without telling the model which to reach for or in what order.
 export const INSTRUCTIONS = [
-  "Zenrows returns the content of public web pages.",
-  "Start with scrape for one page's content, or extract for structured JSON fields.",
-  "For many URLs use batch_create, then batch_wait until it ends, batch_results to page through its rows and batch_content to read one page; to discover the URLs behind a listing or section page, use crawl_create.",
-  "Use the browser_* tools only when a page needs clicks, typing or several steps: browser_navigate opens a session, and browser_close frees it when done.",
-  "Call account_usage (free) before a large job or after a 402.",
-].join(" ");
+  "Zenrows returns the content of public web pages. The tools come in five groups:",
+  "- scrape returns one page's content: markdown, plain text, HTML or a screenshot.",
+  '- extract returns structured JSON fields from one page; prepare_domain and prepared_domain_status set a domain up for its mode "auto".',
+  "- batch_* run a known list of URLs as one asynchronous job.",
+  "- crawl_* start from one URL and collect the URLs it links to on the same site, optionally with each page's content.",
+  "- browser_* drive a hosted browser session for pages that need clicks, typing or several steps; browser_navigate opens the session and browser_close ends it.",
+  "account_usage reports the plan's credits and is free.",
+].join("\n");
 
 export interface ScrapeParams {
   url: string;
@@ -157,24 +159,18 @@ export function createServer(apiKey: KeyRef, clientName?: string, options: Serve
         destructiveHint: false,
         openWorldHint: true,
       },
-      description: `Scrape any webpage and return its content using Zenrows (Fetch).
+      description: `Fetch one web page with Zenrows (Fetch) and return its content: markdown (default), plain text, HTML or a screenshot.
 
-Returns full-page content (markdown/HTML/PDF/screenshot). For structured JSON
-fields (products, articles, listings), the extract tool returns parsed fields
-instead of a full page body.
+For one page's full content.
 
-By default the request uses automatic mode (mode=auto): Zenrows adds JS rendering
-or premium proxies per page only when a plain request does not return the page,
-and charges only for the configuration that succeeds. Pass just the URL.
+Automatic mode (mode=auto) is the default: Zenrows adds JavaScript rendering or premium proxies to a page only when a plain request does not return it, and bills only the configuration that succeeded. A URL alone is enough.
 
-Set js_render or premium_proxy only to force a fixed configuration. Doing so
-switches off automatic mode, and every request is billed at that
-configuration's cost (premium_proxy with js_render is 25x a basic request).
+Setting js_render or premium_proxy turns automatic mode off and bills every request at that fixed configuration: 1 credit basic, 5 with js_render, 10 with premium_proxy, 25 with both.
 
 Examples:
-  Default:  { url: "https://example.com" }
-  Geo:      { url: "https://example.com", proxy_country: "US" }
-  Forced:   { url: "https://spa.com", js_render: true }`,
+  Default:          { url: "https://example.com" }
+  Geo:              { url: "https://example.com", proxy_country: "US" }
+  Forced rendering: { url: "https://spa.com", js_render: true }`,
       inputSchema: {
         url: z.string().url().describe("The webpage URL to scrape"),
 
@@ -182,17 +178,16 @@ Examples:
           .boolean()
           .nullish()
           .describe(
-            "Force JavaScript rendering on every request. Overrides automatic mode (mode=auto), " +
-              "which already renders JavaScript when a page needs it. Leave unset unless you need a fixed configuration."
+            "Optional. Renders JavaScript on every request (5 credits) and turns automatic mode off. " +
+              "Automatic mode already renders a page that needs it."
           ),
 
         premium_proxy: z
           .boolean()
           .nullish()
           .describe(
-            "Force premium residential proxies on every request (10x credit cost). Overrides " +
-              "automatic mode (mode=auto), which already uses premium proxies when a page needs them. " +
-              "Leave unset unless you need a fixed configuration."
+            "Optional. Uses premium residential proxies on every request (10 credits; 25 with js_render) " +
+              "and turns automatic mode off. Automatic mode already adds them to a page that needs them."
           ),
 
         proxy_country: z
@@ -210,8 +205,8 @@ Examples:
           .describe(
             "Output format. 'markdown' (default) preserves structure and is ideal for LLMs. " +
               "'plaintext' strips all formatting for pure text extraction. " +
-              "'pdf' returns a PDF of the page. " +
               "'html' returns the raw HTML source (omits the response_type param; Zenrows default). " +
+              "'pdf' asks the API for a PDF, which this server decodes as text, so the result is not a usable PDF file. " +
               "Ignored when autoparse, css_extractor, outputs, or screenshot params are set."
           ),
 
@@ -236,8 +231,8 @@ Examples:
           .string()
           .nullish()
           .describe(
-            "CSS selector to wait for before capturing. Use when key content loads " +
-              "after the initial page render. Requires js_render=true; without it, including in automatic mode, it may be ignored."
+            "CSS selector to wait for before capturing, for content that loads after the first render. " +
+              "Applies with js_render=true; automatic mode may ignore it."
           ),
 
         wait: z
