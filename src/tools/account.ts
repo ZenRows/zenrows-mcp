@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createRequire } from "module";
+import { apiBase } from "../api-base.js";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 
@@ -19,7 +20,6 @@ const pkg = require("../../package.json") as { version: string };
  * concurrency, which is what makes it safe to call before a batch or on a retry.
  */
 
-const SUBSCRIPTION_DETAILS_URL = "https://api.zenrows.com/v1/subscriptions/self/details";
 
 type TextContent = { type: "text"; text: string };
 
@@ -54,7 +54,7 @@ export async function runAccountUsage(apiKey: string, opts: AccountOpts = {}) {
   const doFetch = opts.fetchImpl ?? fetch;
   let res: Response;
   try {
-    res = await doFetch(SUBSCRIPTION_DETAILS_URL, {
+    res = await doFetch(`${apiBase()}/subscriptions/self/details`, {
       headers: {
         "X-API-Key": apiKey,
         "User-Agent": `zenrows-mcp/${pkg.version}`,
