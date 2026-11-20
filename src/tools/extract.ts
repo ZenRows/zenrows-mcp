@@ -4,12 +4,12 @@ import { z } from "zod";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { fetchWithRetry } from "../retry.js";
+import { apiBase } from "../api-base.js";
 import { normalizeDomain, PAGE_NOT_RECOGNISED_STEPS, POLL_INTERVAL_SECONDS } from "./prepare.js";
 
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
 
-const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 
 type TextContent = { type: "text"; text: string };
 
@@ -210,7 +210,7 @@ async function callZenrows(
   try {
     response = await fetchWithRetry(
       () =>
-        fetchImpl(`${ZENROWS_API_URL}?${searchParams}`, {
+        fetchImpl(`${apiBase()}/?${searchParams}`, {
           headers: {
             "User-Agent": `zenrows/mcp ${pkg.version}`,
             ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),

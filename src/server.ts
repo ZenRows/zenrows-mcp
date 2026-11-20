@@ -9,6 +9,7 @@ import { fetchWithRetry } from "./retry.js";
 import { registerAccountTools } from "./tools/account.js";
 import { registerBatchTools } from "./tools/batch.js";
 import { registerBrowserTools } from "./tools/browser.js";
+import { apiBase } from "./api-base.js";
 import { registerCrawlTools } from "./tools/crawl.js";
 import { registerExtractTool } from "./tools/extract.js";
 import { registerPrepareTools } from "./tools/prepare.js";
@@ -16,7 +17,6 @@ import { registerPrepareTools } from "./tools/prepare.js";
 const require = createRequire(import.meta.url);
 const pkg = require("../package.json") as { version: string };
 
-const ZENROWS_API_URL = "https://api.zenrows.com/v1/";
 
 const DEFAULT_JS_RENDER = process.env.ZENROWS_JS_RENDER === "true";
 const DEFAULT_PREMIUM_PROXY = process.env.ZENROWS_PREMIUM_PROXY === "true";
@@ -301,7 +301,7 @@ Examples:
       try {
         response = await fetchWithRetry(
           () =>
-            fetch(`${ZENROWS_API_URL}?${searchParams}`, {
+            fetch(`${apiBase()}/?${searchParams}`, {
               headers: {
                 "User-Agent": `zenrows/mcp ${pkg.version}`,
                 ...(getClientName() ? { "x-mcp-client-name": getClientName()! } : {}),
