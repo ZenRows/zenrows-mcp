@@ -7,13 +7,13 @@
  * is stored) or absent (URLs only).
  */
 
-export const DEFAULT_CRAWL_API_BASE = "https://api.zenrows.com/v1";
+import { apiBase } from "./api-base.js";
+
 export const CRAWL_API_BASE_ENV = "ZENROWS_CRAWL_API_BASE";
 
 export function crawlBase(): string {
   const env = process.env[CRAWL_API_BASE_ENV];
-  const base = env && env.trim() ? env.trim() : DEFAULT_CRAWL_API_BASE;
-  return base.replace(/\/+$/, "");
+  return env && env.trim() ? env.trim().replace(/\/+$/, "") : apiBase();
 }
 
 export interface CrawlCoverage {

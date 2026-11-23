@@ -1,6 +1,7 @@
 import { createRequire } from "module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { apiBase } from "../api-base.js";
 import { appendClaimHint } from "../auth/claim-hint.js";
 import { keyOf, type KeyRef } from "../auth/key-ref.js";
 
@@ -16,13 +17,11 @@ import { keyOf, type KeyRef } from "../auth/key-ref.js";
 const require = createRequire(import.meta.url);
 const pkg = require("../../package.json") as { version: string };
 
-export const DEFAULT_EXTRACT_API_BASE = "https://api.zenrows.com/v1";
 export const EXTRACT_API_BASE_ENV = "ZENROWS_EXTRACT_API_BASE";
 
 export function extractApiBase(): string {
   const env = process.env[EXTRACT_API_BASE_ENV];
-  const base = env && env.trim() ? env.trim() : DEFAULT_EXTRACT_API_BASE;
-  return base.replace(/\/+$/, "");
+  return env && env.trim() ? env.trim().replace(/\/+$/, "") : apiBase();
 }
 
 export const MAX_EXAMPLE_URLS = 5;

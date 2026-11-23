@@ -128,6 +128,8 @@ Use the local stdio configuration when your MCP client runs the server as a loca
 }
 ```
 
+**Optional:** `ZENROWS_API_BASE` sets the Zenrows API base URL for `scrape`, `extract` and `account_usage` (default `https://api.zenrows.com/v1`). The Crawl and Extract preparation tools follow it unless their own variable below is set. Set it only to point the server at another deployment.
+
 **Optional:** `ZENROWS_CRAWL_API_BASE` sets the Crawl API base URL for the `crawl_*` tools (default `https://api.zenrows.com/v1`). Set it only to point those tools at another deployment.
 
 **Optional:** `ZENROWS_BATCH_API_BASE` sets the Batch API base URL for the `batch_*` tools (default `https://async.api.zenrows.com/v1`). Set it only to point those tools at another deployment.
