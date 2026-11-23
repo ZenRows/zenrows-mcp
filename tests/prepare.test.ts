@@ -208,9 +208,19 @@ test("out_of_allowance is unchanged and has no rejection fields", () => {
   assert.equal(e.domain, undefined);
 });
 
-test("a 429 without a code is still the allowance", () => {
-  assert.equal(prepareError(429, "{}", "x.com").code, "out_of_allowance");
-});
+for (const [label, body] of [
+  ["an empty body", ""],
+  ["an empty object", "{}"],
+  ["plain text", "Too Many Requests"],
+] as const) {
+  test(`a 429 with ${label} is a generic prepare error, not the allowance`, () => {
+    const e = prepareError(429, body, "x.com");
+    assert.equal(e.code, "PREPARE_FAILED");
+    assert.equal(e.status, 429);
+    assert.doesNotMatch(e.message, /allowance/);
+    assert.equal(e.detail, body || undefined);
+  });
+}
 
 test("a 429 with an unknown code keeps the server's code and detail instead of claiming the allowance", () => {
   const e = prepareError(429, JSON.stringify({ code: "something_new", detail: "server says why" }), "x.com");

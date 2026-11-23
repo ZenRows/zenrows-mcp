@@ -219,8 +219,9 @@ export function prepareError(status: number, body: string, domain: string): Prep
       ...(p.month !== undefined ? { month: p.month } : {}),
     };
   }
-  // A bare 429 is the allowance; a 429 with a code this version does not know keeps the server's code and detail.
-  if (code === "out_of_allowance" || (status === 429 && code === undefined)) {
+  // Only an explicit out_of_allowance is the allowance: a 429 without a code, or with a code this version
+  // does not know, falls through to the generic error and keeps the server's detail.
+  if (code === "out_of_allowance") {
     return {
       code: "out_of_allowance",
       message:
