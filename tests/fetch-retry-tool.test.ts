@@ -32,7 +32,7 @@ for (const tool of ["scrape", "extract"]) {
   });
 }
 
-// There a 429 means the allowance is used up and a 503 that preparation is unavailable.
+// There a 429 means the allowance or the domain's rejection limit is used up and a 503 that preparation is unavailable.
 for (const status of [429, 503]) {
   for (const [tool, args, requests] of [
     ["prepare_domain", { domain: "example.com", example_urls: ["https://example.com/p/1"] }, 1],

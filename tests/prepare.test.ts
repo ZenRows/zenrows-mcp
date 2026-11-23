@@ -146,6 +146,90 @@ test("out_of_allowance keeps used / limit / month from the body", () => {
   assert.equal(e.month, "2026-10");
 });
 
+const REJECTION_DETAIL =
+  "example.com had 3 rejected preparation attempts this month (failed verification); the limit is 3 per domain per month. This submission was not accepted and not counted against your allowance. New attempts for this domain reopen at the start of next month (UTC).";
+
+test("prepare_domain maps 429 domain_rejection_limit to its own error, not the allowance", async () => {
+  const { calls, fetchImpl } = stub({
+    [`POST ${BASE}`]: () =>
+      res(429, {
+        code: "domain_rejection_limit",
+        title: "Domain rejection limit reached",
+        status: 429,
+        detail: REJECTION_DETAIL,
+        domain: "example.com",
+        rejected: 3,
+        limit: 3,
+        month: "2026-11",
+      }),
+  });
+  const out = await runPrepareDomain(
+    "k",
+    { domain: "example.com", example_urls: ["https://example.com/p"] },
+    { fetchImpl }
+  );
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.error.code, "domain_rejection_limit");
+  assert.equal(out.error.status, 429);
+  assert.match(out.error.message, /Do not retry this domain this month/);
+  assert.match(out.error.message, /other domains can still be prepared/);
+  assert.match(out.error.message, /mode=css/);
+  assert.doesNotMatch(out.error.message, /monthly allowance/);
+  assert.equal(out.error.detail, REJECTION_DETAIL);
+  assert.equal(out.error.domain, "example.com");
+  assert.equal(out.error.rejected, 3);
+  assert.equal(out.error.limit, 3);
+  assert.equal(out.error.month, "2026-11");
+  assert.equal(calls.length, 1);
+});
+
+test("domain_rejection_limit keeps a limit of 0", () => {
+  const e = prepareError(
+    429,
+    JSON.stringify({ code: "domain_rejection_limit", domain: "x.com", rejected: 1, limit: 0, month: "2026-11" }),
+    "x.com"
+  );
+  assert.equal(e.code, "domain_rejection_limit");
+  assert.equal(e.limit, 0);
+  assert.equal(e.rejected, 1);
+  assert.equal(e.used, undefined);
+});
+
+test("out_of_allowance is unchanged and has no rejection fields", () => {
+  const e = prepareError(
+    429,
+    JSON.stringify({ code: "out_of_allowance", detail: "d", used: 10, limit: 10, month: "2026-11" }),
+    "x.com"
+  );
+  assert.equal(e.code, "out_of_allowance");
+  assert.match(e.message, /monthly allowance of new domains/);
+  assert.equal(e.rejected, undefined);
+  assert.equal(e.domain, undefined);
+});
+
+for (const [label, body] of [
+  ["an empty body", ""],
+  ["an empty object", "{}"],
+  ["plain text", "Too Many Requests"],
+] as const) {
+  test(`a 429 with ${label} is a generic prepare error, not the allowance`, () => {
+    const e = prepareError(429, body, "x.com");
+    assert.equal(e.code, "PREPARE_FAILED");
+    assert.equal(e.status, 429);
+    assert.doesNotMatch(e.message, /allowance/);
+    assert.equal(e.detail, body || undefined);
+  });
+}
+
+test("a 429 with an unknown code keeps the server's code and detail instead of claiming the allowance", () => {
+  const e = prepareError(429, JSON.stringify({ code: "something_new", detail: "server says why" }), "x.com");
+  assert.equal(e.code, "something_new");
+  assert.equal(e.detail, "server says why");
+  assert.equal(e.status, 429);
+  assert.doesNotMatch(e.message, /allowance/);
+});
+
 test("invalid_argument keeps the reason", () => {
   const e = prepareError(400, JSON.stringify({ code: "invalid_argument", reason: "invalid_domain" }), "x");
   assert.equal(e.reason, "invalid_domain");

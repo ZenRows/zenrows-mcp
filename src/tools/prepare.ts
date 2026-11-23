@@ -207,7 +207,21 @@ export function prepareError(status: number, body: string, domain: string): Prep
       detail,
     };
   }
-  if (code === "out_of_allowance" || status === 429) {
+  if (code === "domain_rejection_limit") {
+    return {
+      code: "domain_rejection_limit",
+      message: `Preparations of ${domain} were rejected as many times this month as the limit allows. Do not retry this domain this month; other domains can still be prepared. Use extract with mode=css on this domain meanwhile. This submission used no allowance slot.`,
+      status,
+      detail,
+      ...(p.domain !== undefined ? { domain: p.domain } : {}),
+      ...(p.rejected !== undefined ? { rejected: p.rejected } : {}),
+      ...(p.limit !== undefined ? { limit: p.limit } : {}),
+      ...(p.month !== undefined ? { month: p.month } : {}),
+    };
+  }
+  // Only an explicit out_of_allowance is the allowance: a 429 without a code, or with a code this version
+  // does not know, falls through to the generic error and keeps the server's detail.
+  if (code === "out_of_allowance") {
     return {
       code: "out_of_allowance",
       message:
@@ -373,6 +387,11 @@ extract again. Each new domain uses one slot of the account's monthly allowance
 (prepared_domain_status shows it). A domain already being prepared returns its current
 status; a domain already prepared returns "ready" at once with already_prepared: true and
 uses no slot.
+
+Error out_of_allowance means the monthly allowance is used up: do not retry this month.
+Error domain_rejection_limit means this domain's preparations were rejected too many times
+this month: do not retry this domain until next month, other domains can still be
+prepared, and extract with mode=css works on it meanwhile.
 
 Do not call this for REQS007 with reason page_not_recognised: the domain is already
 prepared and preparing again does not change that answer.`,
