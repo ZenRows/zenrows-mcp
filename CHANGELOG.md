@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.19.1](https://github.com/ZenRows/zenrows-mcp/compare/v2.19.0...v2.19.1) (2026-11-23)
+
+
+### Bug Fixes
+
+* **extract:** stop reporting a domain's rejection limit as a used-up allowance ([#120](https://github.com/ZenRows/zenrows-mcp/issues/120)) ([e7635b8](https://github.com/ZenRows/zenrows-mcp/commit/e7635b8f97f995c546bc0d9a73fff3c4938dfa87))
+
 ## [2.19.0](https://github.com/ZenRows/zenrows-mcp/compare/v2.18.0...v2.19.0) (2026-11-06)
 
 
